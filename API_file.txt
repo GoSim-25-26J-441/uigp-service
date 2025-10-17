@@ -1,0 +1,40 @@
+Endpoints
+
+GET /health – service check
+curl.exe http://localhost:8081/health
+
+GET /llm/ping – Ollama reachability
+curl.exe http://localhost:8081/llm/ping
+
+POST /ingest – upload files + chat → returns jobId
+curl.exe --form "files=@D:\path\sample.puml" --form-string "chat=~200 RPS; internal gRPC" ^
+  http://localhost:8081/ingest
+
+
+GET /jobs/{id}/intermediate – parsed nodes/edges (merged from uploads)
+curl.exe http://localhost:8081/jobs/<jobId>/intermediate
+
+POST /jobs/{id}/fuse – build spec (LLM or mock), saves last_spec.json
+curl.exe -X POST http://localhost:8081/jobs/<jobId>/fuse
+
+GET /jobs/{id}/export?format=json|yaml[&download=false] – export spec
+
+Download with auto filename (includes jobId):
+curl.exe -OJ "http://localhost:8081/jobs/<jobId>/export?format=json"
+curl.exe -OJ "http://localhost:8081/jobs/<jobId>/export?format=yaml"
+
+Save only on server (no local download):
+curl.exe "http://localhost:8081/jobs/<jobId>/export?format=json&download=false"
+
+
+-------------------------------------------------
+Typical flow (3 calls)
+
+Ingest: get jobId
+curl.exe --form "files=@D:\...\sample.puml" --form-string "chat=notes" http://localhost:8081/ingest
+
+Fuse:
+curl.exe -X POST http://localhost:8081/jobs/<jobId>/fuse
+
+Export:
+curl.exe -OJ "http://localhost:8081/jobs/<jobId>/export?format=json"

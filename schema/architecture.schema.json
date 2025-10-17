@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["services","dependencies","datastores","topics","configs","gaps","conflicts","trace","metadata"],
+  "properties": {
+    "services": { "type":"array", "items":{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"type":{"type":"string"}}}},
+    "dependencies": { "type":"array", "items":{"type":"object","required":["from","to","kind"],"properties":{"from":{"type":"string"},"to":{"type":"string"},"kind":{"type":"string","enum":["rest","grpc","event"]},"sync":{"type":"boolean"}}}},
+    "datastores": { "type":"array", "items":{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"engine":{"type":"string"}}}},
+    "topics": { "type":"array", "items":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}},
+    "configs": { "type":"object" },
+    "gaps": { "type":"array" },
+    "conflicts": { "type":"array" },
+    "trace": { "type":"array" },
+    "metadata": { "type":"object", "required":["schemaVersion"], "properties":{"schemaVersion":{"type":"string"}}}
+  },
+  "additionalProperties": true
+}

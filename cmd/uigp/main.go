@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,10 +15,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
 
 	"github.com/MalithGihan/uigp-service/internal/fusion"
 	"github.com/MalithGihan/uigp-service/internal/ingest"
 	"github.com/MalithGihan/uigp-service/internal/store"
+	"github.com/MalithGihan/uigp-service/internal/validate"
 )
 
 type pingResp struct {
@@ -29,6 +33,7 @@ type pingResp struct {
 func main() {
 	_ = godotenv.Load()
 	port := getenv("PORT", "8081")
+	model := getenv("OLLAMA_MODEL", "llama3:instruct")
 	ollamaURL := getenv("OLLAMA_URL", "http://localhost:11434")
 
 	dataRoot := getenv("DATA_ROOT", "./projects")
@@ -150,7 +155,8 @@ func main() {
 	// Fuse (mock)
 	r.Post("/jobs/{id}/fuse", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		upDir := filepath.Join(st.JobDir(id), "uploads")
+		jobDir := st.JobDir(id)
+		upDir := filepath.Join(jobDir, "uploads")
 		entries, err := os.ReadDir(upDir)
 		if err != nil {
 			http.Error(w, "job not found", http.StatusNotFound)
@@ -187,9 +193,82 @@ func main() {
 			}
 		}
 		ig := ingest.BuildIntermediate(parsed)
-		spec := fusion.MockFromIntermediate(ig)
+		chat := fusion.LoadChat(jobDir)
+
+		// try real LLM
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		out, err := fusion.FuseWithOllama(ctx, ollamaURL, model, ig, chat)
+		if err != nil || out == nil {
+			log.Printf("FuseWithOllama fallback: %v", err)
+			out = fusion.MockFromIntermediate(ig)
+			out["__note"] = "LLM unavailable, returned mock spec"
+		}
+		if err := validate.ValidateMap(out); err != nil {
+			// try one repair pass
+			rctx, cancel2 := context.WithTimeout(r.Context(), 60*time.Second)
+			defer cancel2()
+			repaired, rerr := fusion.RepairWithOllama(rctx, ollamaURL, model, out, err.Error())
+			if rerr == nil && repaired != nil && validate.ValidateMap(repaired) == nil {
+				out = repaired
+			} else {
+				// still invalid → return errors (and keep mock/LLM output)
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{
+					"ok":     false,
+					"errors": err.Error(),
+					"spec":   out,
+				})
+				return
+			}
+		}
+		_ = os.WriteFile(filepath.Join(jobDir, "last_spec.json"), mustJSONBytes(out), 0o644)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(spec)
+		json.NewEncoder(w).Encode(out)
+
+	})
+
+	r.Get("/jobs/{id}/export", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		format := r.URL.Query().Get("format")
+		if format == "" {
+			format = "json"
+		}
+
+		jobDir := st.JobDir(id)
+		specPath := filepath.Join(jobDir, "last_spec.json")
+		b, err := os.ReadFile(specPath)
+		if err != nil {
+			http.Error(w, "spec not found - run /jobs/{id}/fuse first", http.StatusNotFound)
+			return
+		}
+		var spec map[string]any
+		_ = json.Unmarshal(b, &spec)
+
+		// ensure exports dir
+		expDir := filepath.Join(jobDir, "exports")
+		_ = os.MkdirAll(expDir, 0o755)
+
+		switch format {
+		case "yaml", "yml":
+			data, _ := yaml.Marshal(spec)
+			out := filepath.Join(expDir, "architecture.yaml")
+			_ = os.WriteFile(out, data, 0o644)
+
+			w.Header().Set("Content-Type", "application/x-yaml")
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="architecture-%s.yaml"`, id))
+			w.WriteHeader(http.StatusOK)
+			w.Write(data)
+		default:
+			data, _ := json.MarshalIndent(spec, "", "  ")
+			out := filepath.Join(expDir, "architecture.json")
+			_ = os.WriteFile(out, data, 0o644)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="architecture-%s.json"`, id))
+			w.WriteHeader(http.StatusOK)
+			w.Write(data)
+		}
 	})
 
 	log.Printf("uigp-service listening on :%s", port)
@@ -202,3 +281,5 @@ func getenv(k, def string) string {
 	}
 	return def
 }
+
+func mustJSONBytes(v any) []byte { b, _ := json.Marshal(v); return b }
