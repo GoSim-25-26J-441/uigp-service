@@ -1,0 +1,11 @@
+﻿@startuml
+component "Orders" as O
+component "Payments" as P
+node "GW:api-gateway" as GW
+rectangle "DB:paydb" as DB
+
+O --> P : <<gRPC>>
+O --> GW : [REST]
+GW --> O : REST
+P --> DB : [SUB]
+@enduml
