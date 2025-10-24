@@ -12,25 +12,16 @@ func RepairWithOllama(ctx context.Context, ollamaURL, model string, bad map[stri
 	if model == "" {
 		model = "llama3:instruct"
 	}
-	sys := `You returned JSON that failed schema validation. 
-Repair it so it satisfies the schema keys exactly:
-{ services:[], apis:[], datastores:[], topics:[], dependencies:[], configs:{}, constraints:{}, deploymentHints:{}, gaps:[], conflicts:[], trace:[], metadata:{schemaVersion:string} }
-- Keep all facts you already produced.
-- Fix only structure/types to satisfy the schema.
-- Return ONLY valid JSON.`
-
 	req := map[string]any{
-		"model":  model,
-		"system": sys,
-		"prompt": map[string]any{
-			"spec":   bad,
-			"errors": validationErr,
-		},
-		"format": "json",
-		"options": map[string]any{
-			"temperature": 0.2,
-			"num_ctx":     1024,
-		},
+		"model": model,
+		"system": `You returned JSON that failed schema validation.
+Repair it to satisfy exactly these keys:
+{ services:[], apis:[], datastores:[], topics:[], dependencies:[], configs:{}, constraints:{}, deploymentHints:{}, gaps:[], conflicts:[], trace:[], metadata:{schemaVersion:string} }
+Keep facts; fix only structure/types. Return ONLY valid JSON.`,
+		"prompt":  map[string]any{"spec": bad, "errors": validationErr},
+		"format":  "json",
+		"stream":  false,
+		"options": map[string]any{"temperature": 0.2, "num_ctx": 1024, "num_predict": 512},
 	}
 	b, _ := json.Marshal(req)
 	if ollamaURL == "" {
