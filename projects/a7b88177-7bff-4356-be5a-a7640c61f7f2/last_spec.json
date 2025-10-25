@@ -1,1 +1,0 @@
-{"__note":"LLM unavailable, returned mock spec","configs":{},"conflicts":[],"datastores":[],"dependencies":[{"from":"Orders","kind":"rest","sync":true,"to":"Payments"}],"gaps":[],"metadata":{"generator":"mock","schemaVersion":"0.1.0"},"services":[{"name":"Orders","type":"service"},{"name":"Payments","type":"service"}],"topics":[],"trace":[]}
