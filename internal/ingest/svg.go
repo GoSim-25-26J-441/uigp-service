@@ -5,7 +5,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -27,7 +26,7 @@ type svgLine struct {
 	X2        string `xml:"x2,attr"`
 	Y2        string `xml:"y2,attr"`
 	Class     string `xml:"class,attr"`
-	MarkerEnd string `xml:"marker-end,attr"` // presence usually means arrow
+	MarkerEnd string `xml:"marker-end,attr"`
 }
 
 func ParseSVG(fp string) (ParsedFile, error) {
@@ -44,10 +43,9 @@ func ParseSVG(fp string) (ParsedFile, error) {
 		}, nil
 	}
 
-	// ---- Nodes from <text> ----
 	var nodes []types.Node
 	type pt struct{ x, y float64 }
-	textPos := map[string]pt{} // id -> position (by node ID)
+	textPos := map[string]pt{}
 	seen := map[string]int{}
 
 	for _, t := range doc.Texts {
@@ -67,18 +65,14 @@ func ParseSVG(fp string) (ParsedFile, error) {
 
 		nodes = append(nodes, types.Node{
 			ID:     id,
-			Type:   guessTypeFromLabel(label), // reuse your existing helper in drawio.go
+			Type:   guessTypeFromLabel(label), // from drawio.go
 			Label:  label,
 			Source: "svg",
 		})
 	}
 
-	// ---- Edges from <line> ----
-	// Heuristic: if class contains "arrow" or marker-end is set, treat as directed x1,y1 -> x2,y2.
-	// Map each endpoint to nearest node label position.
 	var edges []types.Edge
 	if len(nodes) > 1 && len(doc.Lines) > 0 {
-		// Build a quick slice of node ids with positions
 		type npos struct {
 			id string
 			p  pt
@@ -137,7 +131,7 @@ func ParseSVG(fp string) (ParsedFile, error) {
 
 	notes := []string{}
 	if len(edges) == 0 {
-		notes = append(notes, "svg: text parsed, no arrows detected (add class=\"arrow\" or marker-end for lines)")
+		notes = append(notes, `svg: text parsed, no arrows detected (add class="arrow" or marker-end for lines)`)
 	}
 
 	return ParsedFile{
@@ -146,32 +140,4 @@ func ParseSVG(fp string) (ParsedFile, error) {
 		Edges: edges,
 		Notes: notes,
 	}, nil
-}
-
-var nonWord = regexp.MustCompile(`[^a-z0-9\-]+`)
-
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.ReplaceAll(s, " ", "-")
-	s = strings.ReplaceAll(s, ".", "-")
-	s = nonWord.ReplaceAllString(s, "")
-	if s == "" {
-		s = "node"
-	}
-	return s
-}
-
-func itoa(n int) string {
-	const digits = "0123456789"
-	if n == 0 {
-		return "0"
-	}
-	var b [12]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = digits[n%10]
-		n /= 10
-	}
-	return string(b[i:])
 }
