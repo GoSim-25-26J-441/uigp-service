@@ -1,0 +1,1 @@
+{"model":"llama3:instruct","format":"json","options":{"temperature":0.2,"num_ctx":512,"num_predict":128},"system":"Return ONLY this exact JSON: {\"ok\":true}","prompt":"Say nothing else."}

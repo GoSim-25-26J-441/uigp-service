@@ -14,6 +14,7 @@ import (
 type spec = map[string]any
 
 func FuseWithOllama(ctx context.Context, ollamaURL, model string, ig types.IntermediateGraph, chat string) (spec, error) {
+
 	if model == "" {
 		model = "llama3:instruct"
 	}
@@ -26,18 +27,18 @@ Rules:
 - Prefer diagram facts (nodes/edges/protocols) over chat when conflicting; record conflicts.
 - Normalize service names to kebab-case; keep original in trace.`
 
-	features := map[string]any{
-		"nodes": ig.Nodes, "edges": ig.Edges, "notes": ig.Notes,
-		"chat": chat,
-	}
+	features := lite(ig, chat)
+
 	reqBody := map[string]any{
 		"model":  model,
 		"system": sys,
 		"prompt": mustJSON(features),
 		"format": "json",
+		"stream": false,
 		"options": map[string]any{
 			"temperature": 0.2,
-			"num_ctx":     2048,
+			"num_ctx":     1024,
+			"num_predict": 512,
 		},
 	}
 	b, _ := json.Marshal(reqBody)
@@ -74,4 +75,19 @@ func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 func LoadChat(jobDir string) string {
 	b, _ := os.ReadFile(jobDir + "/chat.txt")
 	return string(b)
+}
+
+func lite(ig types.IntermediateGraph, chat string) map[string]any {
+	labels := make([]string, 0, len(ig.Nodes))
+	for _, n := range ig.Nodes {
+		labels = append(labels, n.Label)
+	}
+	edges := make([][3]string, 0, len(ig.Edges))
+	for _, e := range ig.Edges {
+		edges = append(edges, [3]string{e.From, e.To, e.Protocol})
+	}
+	if len(chat) > 400 {
+		chat = chat[:400]
+	} // trim long chat
+	return map[string]any{"services": labels, "links": edges, "chat": chat}
 }

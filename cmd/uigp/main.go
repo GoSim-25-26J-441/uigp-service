@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,6 +20,7 @@ import (
 	"github.com/MalithGihan/uigp-service/internal/ingest"
 	"github.com/MalithGihan/uigp-service/internal/store"
 	"github.com/MalithGihan/uigp-service/internal/validate"
+	"github.com/MalithGihan/uigp-service/pkg/types"
 )
 
 type pingResp struct {
@@ -29,6 +29,25 @@ type pingResp struct {
 	OllamaReachable bool   `json:"ollama_reachable"`
 	Note            string `json:"note,omitempty"`
 }
+
+func loadIG(path string) (map[string]any, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	return m, json.Unmarshal(b, &m)
+}
+func saveIG(path string, ig any) { _ = os.WriteFile(path, mustJSONBytes(ig), 0o644) }
+
+func getenv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+func mustJSONBytes(v any) []byte { b, _ := json.Marshal(v); return b }
 
 func main() {
 	_ = godotenv.Load()
@@ -50,22 +69,16 @@ func main() {
 	})
 
 	r.Get("/llm/ping", func(w http.ResponseWriter, _ *http.Request) {
-		body, _ := json.Marshal(map[string]any{
-			"model":   "llama3:instruct",
-			"format":  "json",
-			"system":  `Return ONLY valid JSON: {"ok":true}`,
-			"prompt":  "Say nothing else—just the JSON.",
-			"options": map[string]any{"temperature": 0.2},
-		})
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Post(ollamaURL+"/api/generate", "application/json", bytes.NewReader(body))
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Get(ollamaURL + "/api/tags")
 		reachable := err == nil && resp != nil && resp.StatusCode < 500
 		if resp != nil {
 			resp.Body.Close()
 		}
+
 		out := pingResp{OK: true, OllamaURL: ollamaURL, OllamaReachable: reachable}
 		if !reachable {
-			out.Note = "Ollama not running or model not pulled yet — OK for now."
+			out.Note = "Ollama not reachable — is the desktop app/server running?"
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(out)
@@ -108,10 +121,23 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "jobId": jobID})
 	})
 
-	// Parse to IntermediateGraph
+	// Get Intermediate Graph
 	r.Get("/jobs/{id}/intermediate", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		upDir := filepath.Join(st.JobDir(id), "uploads")
+		jobDir := st.JobDir(id)
+		upDir := filepath.Join(jobDir, "uploads")
+		igPath := filepath.Join(jobDir, "intermediate.json")
+		refresh := r.URL.Query().Get("refresh") == "true"
+
+		// Use cache if present and not refreshing
+		if !refresh {
+			if igm, err := loadIG(igPath); err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(igm)
+				return
+			}
+		}
+
 		entries, err := os.ReadDir(upDir)
 		if err != nil {
 			http.Error(w, "job not found", http.StatusNotFound)
@@ -148,6 +174,8 @@ func main() {
 			}
 		}
 		ig := ingest.BuildIntermediate(parsed)
+		saveIG(igPath, ig)
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ig)
 	})
@@ -156,46 +184,56 @@ func main() {
 	r.Post("/jobs/{id}/fuse", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		jobDir := st.JobDir(id)
-		upDir := filepath.Join(jobDir, "uploads")
-		entries, err := os.ReadDir(upDir)
-		if err != nil {
-			http.Error(w, "job not found", http.StatusNotFound)
-			return
+		igPath := filepath.Join(jobDir, "intermediate.json")
+
+		var ig types.IntermediateGraph
+		if igm, err := loadIG(igPath); err == nil {
+			// reuse cache
+			b, _ := json.Marshal(igm)
+			_ = json.Unmarshal(b, &ig)
+		} else {
+			// build from uploads
+			upDir := filepath.Join(jobDir, "uploads")
+			entries, err := os.ReadDir(upDir)
+			if err != nil {
+				http.Error(w, "job not found", http.StatusNotFound)
+				return
+			}
+			var parsed []ingest.ParsedFile
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				fp := filepath.Join(upDir, e.Name())
+				switch ingest.DetectType(e.Name()) {
+				case "drawio":
+					if p, err := ingest.ParseDrawIO(fp); err == nil {
+						parsed = append(parsed, p)
+					}
+				case "puml":
+					if p, err := ingest.ParsePUML(fp); err == nil {
+						parsed = append(parsed, p)
+					}
+				case "svg":
+					if p, err := ingest.ParseSVG(fp); err == nil {
+						parsed = append(parsed, p)
+					}
+				case "pdf":
+					if p, err := ingest.ParsePDF(fp); err == nil {
+						parsed = append(parsed, p)
+					}
+				case "raster":
+					if p, err := ingest.ParseRaster(fp); err == nil {
+						parsed = append(parsed, p)
+					}
+				}
+			}
+			ig = ingest.BuildIntermediate(parsed)
+			saveIG(igPath, ig)
 		}
 
-		var parsed []ingest.ParsedFile
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			fp := filepath.Join(upDir, e.Name())
-			switch ingest.DetectType(e.Name()) {
-			case "drawio":
-				if p, err := ingest.ParseDrawIO(fp); err == nil {
-					parsed = append(parsed, p)
-				}
-			case "puml":
-				if p, err := ingest.ParsePUML(fp); err == nil {
-					parsed = append(parsed, p)
-				}
-			case "svg":
-				if p, err := ingest.ParseSVG(fp); err == nil {
-					parsed = append(parsed, p)
-				}
-			case "pdf":
-				if p, err := ingest.ParsePDF(fp); err == nil {
-					parsed = append(parsed, p)
-				}
-			case "raster":
-				if p, err := ingest.ParseRaster(fp); err == nil {
-					parsed = append(parsed, p)
-				}
-			}
-		}
-		ig := ingest.BuildIntermediate(parsed)
 		chat := fusion.LoadChat(jobDir)
 
-		// try real LLM
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		out, err := fusion.FuseWithOllama(ctx, ollamaURL, model, ig, chat)
@@ -204,28 +242,23 @@ func main() {
 			out = fusion.MockFromIntermediate(ig)
 			out["__note"] = "LLM unavailable, returned mock spec"
 		}
+
+		out = fusion.Sanitize(out)
 		if err := validate.ValidateMap(out); err != nil {
-			// try one repair pass
 			rctx, cancel2 := context.WithTimeout(r.Context(), 60*time.Second)
 			defer cancel2()
-			repaired, rerr := fusion.RepairWithOllama(rctx, ollamaURL, model, out, err.Error())
-			if rerr == nil && repaired != nil && validate.ValidateMap(repaired) == nil {
+			if repaired, rerr := fusion.RepairWithOllama(rctx, ollamaURL, model, out, err.Error()); rerr == nil && repaired != nil && validate.ValidateMap(repaired) == nil {
 				out = repaired
 			} else {
-				// still invalid → return errors (and keep mock/LLM output)
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{
-					"ok":     false,
-					"errors": err.Error(),
-					"spec":   out,
-				})
-				return
+				if _, ok := out["metadata"]; !ok {
+					out["metadata"] = map[string]any{"schemaVersion": "0.1.0", "generator": "repair-fallback"}
+				}
 			}
 		}
+
 		_ = os.WriteFile(filepath.Join(jobDir, "last_spec.json"), mustJSONBytes(out), 0o644)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(out)
-
+		_ = json.NewEncoder(w).Encode(out)
 	})
 
 	r.Get("/jobs/{id}/export", func(w http.ResponseWriter, r *http.Request) {
@@ -271,15 +304,55 @@ func main() {
 		}
 	})
 
+	r.Get("/jobs/{id}/report", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		jobDir := st.JobDir(id)
+		specPath := filepath.Join(jobDir, "last_spec.json")
+		download := r.URL.Query().Get("download") == "true"
+
+		b, err := os.ReadFile(specPath)
+		if err != nil {
+			http.Error(w, "spec not found - run /fuse first", 404)
+			return
+		}
+
+		var spec map[string]any
+		_ = json.Unmarshal(b, &spec)
+
+		getArr := func(k string) []any {
+			if v, ok := spec[k].([]any); ok {
+				return v
+			}
+			return []any{}
+		}
+		out := map[string]any{
+			"ok": true,
+			"counts": map[string]any{
+				"services":     len(getArr("services")),
+				"dependencies": len(getArr("dependencies")),
+				"datastores":   len(getArr("datastores")),
+				"topics":       len(getArr("topics")),
+				"gaps":         len(getArr("gaps")),
+				"conflicts":    len(getArr("conflicts")),
+			},
+			"gaps":      getArr("gaps"),
+			"conflicts": getArr("conflicts"),
+		}
+
+		// save on server
+		expDir := filepath.Join(jobDir, "exports")
+		_ = os.MkdirAll(expDir, 0o755)
+		repPath := filepath.Join(expDir, "report-"+id+".json")
+		_ = os.WriteFile(repPath, mustJSONBytes(out), 0o644)
+
+		if download {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Disposition", `attachment; filename="report-`+id+`.json"`)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	})
+
 	log.Printf("uigp-service listening on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
 }
-
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func mustJSONBytes(v any) []byte { b, _ := json.Marshal(v); return b }

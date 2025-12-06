@@ -1,5 +1,7 @@
 Endpoints
 
+Start the server - go run .\cmd\uigp
+
 GET /health – service check
 curl.exe http://localhost:8081/health
 
@@ -25,6 +27,12 @@ curl.exe -OJ "http://localhost:8081/jobs/<jobId>/export?format=yaml"
 
 Save only on server (no local download):
 curl.exe "http://localhost:8081/jobs/<jobId>/export?format=json&download=false"
+
+# just JSON response + saved to projects/<jobId>/exports/report-<jobId>.json
+curl.exe http://localhost:8081/jobs/<jobId>/report
+
+# force a download (to your current folder) and also saved server-side
+curl.exe -OJ "http://localhost:8081/jobs/<jobId>/report?download=true"
 
 
 -------------------------------------------------
