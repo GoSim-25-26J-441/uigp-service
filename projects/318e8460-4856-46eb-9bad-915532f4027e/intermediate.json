@@ -1,1 +1,0 @@
-{"Nodes":[{"ID":"Orders","Type":"service","Label":"Orders","Source":"puml","BBox":[0,0,0,0]},{"ID":"Payments","Type":"service","Label":"Payments","Source":"puml","BBox":[0,0,0,0]}],"Edges":[{"From":"Orders","To":"Payments","Protocol":"REST","BBox":[0,0,0,0]}],"Notes":null,"Trace":null}

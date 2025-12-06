@@ -1,5 +1,0 @@
-﻿@startuml
-component "Orders" as Orders
-component "Payments" as Payments
-Orders --> Payments : REST
-@enduml

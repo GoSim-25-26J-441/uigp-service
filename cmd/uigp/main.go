@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -173,7 +174,31 @@ func main() {
 				}
 			}
 		}
+
 		ig := ingest.BuildIntermediate(parsed)
+		chatB, _ := os.ReadFile(filepath.Join(st.JobDir(id), "chat.txt"))
+		chat := strings.ToLower(string(chatB))
+		if len(ig.Edges) == 0 && len(ig.Nodes) == 2 {
+			proto := ""
+			switch {
+			case strings.Contains(chat, "grpc"):
+				proto = "gRPC"
+			case strings.Contains(chat, "pubsub"), strings.Contains(chat, "kafka"), strings.Contains(chat, "queue"), strings.Contains(chat, "mq"):
+				proto = "PUBSUB"
+			case strings.Contains(chat, "rest"), strings.Contains(chat, "http"):
+				proto = "REST"
+			}
+
+			if proto != "" {
+				ig.Edges = append(ig.Edges, types.Edge{
+					From:     ig.Nodes[0].ID,
+					To:       ig.Nodes[1].ID,
+					Protocol: proto,
+				})
+				ig.Notes = append(ig.Notes, "inferred 1 edge from chat context")
+			}
+		}
+
 		saveIG(igPath, ig)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -182,23 +207,25 @@ func main() {
 
 	// Fuse (mock)
 	r.Post("/jobs/{id}/fuse", func(w http.ResponseWriter, r *http.Request) {
+		type response = map[string]any
+
 		id := chi.URLParam(r, "id")
 		jobDir := st.JobDir(id)
 		igPath := filepath.Join(jobDir, "intermediate.json")
 
 		var ig types.IntermediateGraph
+
 		if igm, err := loadIG(igPath); err == nil {
-			// reuse cache
 			b, _ := json.Marshal(igm)
 			_ = json.Unmarshal(b, &ig)
 		} else {
-			// build from uploads
 			upDir := filepath.Join(jobDir, "uploads")
 			entries, err := os.ReadDir(upDir)
 			if err != nil {
 				http.Error(w, "job not found", http.StatusNotFound)
 				return
 			}
+
 			var parsed []ingest.ParsedFile
 			for _, e := range entries {
 				if e.IsDir() {
@@ -236,6 +263,7 @@ func main() {
 
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
+
 		out, err := fusion.FuseWithOllama(ctx, ollamaURL, model, ig, chat)
 		if err != nil || out == nil {
 			log.Printf("FuseWithOllama fallback: %v", err)
@@ -243,11 +271,12 @@ func main() {
 			out["__note"] = "LLM unavailable, returned mock spec"
 		}
 
-		out = fusion.Sanitize(out)
-		if err := validate.ValidateMap(out); err != nil {
+		out = fusion.SanitizeWithContext(out, &ig, jobDir)
+
+		if verr := validate.ValidateMap(out); verr != nil {
 			rctx, cancel2 := context.WithTimeout(r.Context(), 60*time.Second)
 			defer cancel2()
-			if repaired, rerr := fusion.RepairWithOllama(rctx, ollamaURL, model, out, err.Error()); rerr == nil && repaired != nil && validate.ValidateMap(repaired) == nil {
+			if repaired, rerr := fusion.RepairWithOllama(rctx, ollamaURL, model, out, verr.Error()); rerr == nil && repaired != nil && validate.ValidateMap(repaired) == nil {
 				out = repaired
 			} else {
 				if _, ok := out["metadata"]; !ok {
