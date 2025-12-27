@@ -172,6 +172,11 @@ func main() {
 				if p, err := ingest.ParseRaster(fp); err == nil {
 					parsed = append(parsed, p)
 				}
+
+			case "canvas-json":
+				if p, err := ingest.ParseCanvasJSON(fp); err == nil {
+					parsed = append(parsed, p)
+				}
 			}
 		}
 
@@ -210,6 +215,7 @@ func main() {
 		type response = map[string]any
 
 		id := chi.URLParam(r, "id")
+		log.Printf("[fuse] hit for job=%s", id)
 		jobDir := st.JobDir(id)
 		igPath := filepath.Join(jobDir, "intermediate.json")
 

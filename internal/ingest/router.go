@@ -20,6 +20,8 @@ func DetectType(name string) string {
 		return "pdf"
 	case ".png", ".jpg", ".jpeg":
 		return "raster"
+	case ".json":
+		return "canvas-json"
 	default:
 		return "unknown"
 	}
