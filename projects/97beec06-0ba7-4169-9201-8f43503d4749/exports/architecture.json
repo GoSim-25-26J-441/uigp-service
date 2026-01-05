@@ -1,0 +1,119 @@
+{
+  "__note": "LLM unavailable, returned mock spec",
+  "apis": [
+    {
+      "name": "REST",
+      "protocol": "rest"
+    }
+  ],
+  "configs": {
+    "slo": {
+      "target_rps": 200
+    }
+  },
+  "conflicts": [],
+  "constraints": {},
+  "datastores": [],
+  "dependencies": [
+    {
+      "from": "db",
+      "kind": "rest",
+      "sync": true,
+      "to": "order"
+    },
+    {
+      "from": "order",
+      "kind": "rest",
+      "sync": true,
+      "to": "authentication"
+    },
+    {
+      "from": "client",
+      "kind": "rest",
+      "sync": true,
+      "to": "authentication"
+    },
+    {
+      "from": "client",
+      "kind": "rest",
+      "sync": true,
+      "to": "user"
+    },
+    {
+      "from": "resturant",
+      "kind": "rest",
+      "sync": true,
+      "to": "authentication"
+    },
+    {
+      "from": "payment",
+      "kind": "rest",
+      "sync": true,
+      "to": "order"
+    },
+    {
+      "from": "users",
+      "kind": "rest",
+      "sync": true,
+      "to": "authentication"
+    },
+    {
+      "from": "db-2",
+      "kind": "rest",
+      "sync": true,
+      "to": "users"
+    },
+    {
+      "from": "db-2",
+      "kind": "rest",
+      "sync": true,
+      "to": "resturant"
+    }
+  ],
+  "deploymentHints": {},
+  "gaps": [],
+  "metadata": {
+    "generator": "mock",
+    "schemaVersion": "0.1.0"
+  },
+  "services": [
+    {
+      "name": "user",
+      "type": "service"
+    },
+    {
+      "name": "client",
+      "type": "service"
+    },
+    {
+      "name": "order",
+      "type": "service"
+    },
+    {
+      "name": "authentication",
+      "type": "service"
+    },
+    {
+      "name": "payment",
+      "type": "service"
+    },
+    {
+      "name": "resturant",
+      "type": "service"
+    },
+    {
+      "name": "users",
+      "type": "service"
+    },
+    {
+      "name": "db",
+      "type": "service"
+    },
+    {
+      "name": "db-2",
+      "type": "service"
+    }
+  ],
+  "topics": [],
+  "trace": []
+}
