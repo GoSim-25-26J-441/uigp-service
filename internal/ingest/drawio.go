@@ -24,8 +24,8 @@ type root struct {
 type mxCell struct {
 	ID     string `xml:"id,attr"`
 	Value  string `xml:"value,attr"`
-	Vertex string `xml:"vertex,attr"` // "1" if node
-	Edge   string `xml:"edge,attr"`   // "1" if edge
+	Vertex string `xml:"vertex,attr"`
+	Edge   string `xml:"edge,attr"`
 	Source string `xml:"source,attr"`
 	Target string `xml:"target,attr"`
 	Parent string `xml:"parent,attr"`
@@ -39,7 +39,7 @@ func ParseDrawIO(path string) (ParsedFile, error) {
 
 	var doc mxfile
 	if err := xml.Unmarshal(b, &doc); err != nil {
-		return ParsedFile{Name: path, Notes: []string{"xml unmarshal failed"}}, nil // soft fail: just a note
+		return ParsedFile{Name: path, Notes: []string{"xml unmarshal failed"}}, nil
 	}
 
 	var nodes []types.Node
@@ -69,7 +69,6 @@ func ParseDrawIO(path string) (ParsedFile, error) {
 
 func stripHTML(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	// draw.io often wraps labels like <div>Service</div>
 	s = strings.ReplaceAll(s, "<div>", "")
 	s = strings.ReplaceAll(s, "</div>", "")
 	return s

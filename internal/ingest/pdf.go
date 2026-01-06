@@ -1,6 +1,5 @@
 package ingest
 
-// Placeholder: we’ll add pdf text extraction (vector) and OCR fallback later.
 func ParsePDF(path string) (ParsedFile, error) {
 	return ParsedFile{
 		Name:  path,

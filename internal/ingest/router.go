@@ -27,7 +27,6 @@ func DetectType(name string) string {
 	}
 }
 
-// Merge multiple files into one IntermediateGraph (append nodes/edges).
 func BuildIntermediate(files []ParsedFile) types.IntermediateGraph {
 	ig := types.IntermediateGraph{}
 	for _, f := range files {

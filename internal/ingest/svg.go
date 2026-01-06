@@ -65,7 +65,7 @@ func ParseSVG(fp string) (ParsedFile, error) {
 
 		nodes = append(nodes, types.Node{
 			ID:     id,
-			Type:   guessTypeFromLabel(label), // from drawio.go
+			Type:   guessTypeFromLabel(label),
 			Label:  label,
 			Source: "svg",
 		})

@@ -266,7 +266,6 @@ func isPlausibleLabel(s string) bool {
 		}
 	}
 
-	// must contain some but not only vowels
 	vowels := 0
 	for _, r := range s {
 		switch r {
@@ -311,13 +310,13 @@ func buildNodesFromLabels(labels []string) []types.Node {
 	var nodes []types.Node
 	seen := map[string]int{}
 	for _, lbl := range labels {
-		id := slugify(lbl) // defined elsewhere
+		id := slugify(lbl)
 		seen[id]++
 		if seen[id] > 1 {
 			id = id + "_" + itoa(seen[id])
-		} // defined elsewhere
+		}
 		nodes = append(nodes, types.Node{
-			ID: id, Type: guessTypeFromLabel(lbl), Label: lbl, Source: "raster", // guessTypeFromLabel defined elsewhere
+			ID: id, Type: guessTypeFromLabel(lbl), Label: lbl, Source: "raster",
 		})
 	}
 	return nodes

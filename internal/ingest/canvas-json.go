@@ -75,7 +75,6 @@ func fromCanvasJSON(path string) (*types.IntermediateGraph, error) {
 		})
 	}
 
-	// services, datastores, topics → nodes
 	for _, s := range doc.Services {
 		addNode(s.Name, s.Kind)
 	}
@@ -86,7 +85,6 @@ func fromCanvasJSON(path string) (*types.IntermediateGraph, error) {
 		addNode(t.Name, "topic")
 	}
 
-	// dependencies → edges
 	for _, dep := range doc.Dependencies {
 		proto := strings.ToUpper(dep.Kind)
 		if proto == "" {
@@ -104,15 +102,15 @@ func fromCanvasJSON(path string) (*types.IntermediateGraph, error) {
 }
 
 func ParseCanvasJSON(path string) (ParsedFile, error) {
-	g, err := fromCanvasJSON(path) // your existing helper returning *types.IntermediateGraph
+	g, err := fromCanvasJSON(path)
 	if err != nil {
 		return ParsedFile{}, err
 	}
 
 	return ParsedFile{
 		Name:  filepath.Base(path),
-		Nodes: g.Nodes, // []types.Node
-		Edges: g.Edges, // []types.Edge
+		Nodes: g.Nodes,
+		Edges: g.Edges,
 		Notes: g.Notes,
 	}, nil
 }

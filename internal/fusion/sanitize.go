@@ -150,7 +150,7 @@ func SanitizeWithContext(spec map[string]any, ig *types.IntermediateGraph, jobDi
 			deps = append(deps, map[string]any{
 				"from": strings.ToLower(autoCorrectLabel(e.From)),
 				"to":   strings.ToLower(autoCorrectLabel(e.To)),
-				"kind": protoNormLower(e.Protocol), // rest|grpc|event
+				"kind": protoNormLower(e.Protocol),
 				"sync": true,
 			})
 		}
@@ -160,12 +160,12 @@ func SanitizeWithContext(spec map[string]any, ig *types.IntermediateGraph, jobDi
 		seen := map[string]bool{}
 		var apis []map[string]any
 		for _, d := range deps {
-			k := d["kind"].(string) // rest|grpc|event
+			k := d["kind"].(string)
 			if !seen[k] {
 				seen[k] = true
 				apis = append(apis, map[string]any{
-					"name":     strings.ToUpper(k), // REST/GRPC/EVENT
-					"protocol": k,                  // rest|grpc|event
+					"name":     strings.ToUpper(k),
+					"protocol": k,
 				})
 			}
 		}
@@ -197,7 +197,7 @@ func SanitizeWithContext(spec map[string]any, ig *types.IntermediateGraph, jobDi
 						gm, _ := g.(map[string]any)
 						desc, _ := gm["description"].(string)
 						if strings.Contains(strings.ToLower(desc), "rps") {
-							continue // drop "RPS rate" gaps
+							continue
 						}
 						kept = append(kept, g)
 					}
@@ -261,9 +261,7 @@ func SanitizeWithContext(spec map[string]any, ig *types.IntermediateGraph, jobDi
 		for _, v := range tr {
 			if m, ok := v.(map[string]any); ok {
 				if n, _ := m["name"].(string); n != "" && !svcSet[n] {
-					// if a “name” doesn’t exist in services but originalName does, try to align
 					if on, _ := m["originalName"].(string); on != "" {
-						// trivial fix: keep originalName, drop name to avoid confusion
 						delete(m, "name")
 					}
 				}

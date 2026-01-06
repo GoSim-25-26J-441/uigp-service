@@ -8,13 +8,10 @@ import (
 	"github.com/MalithGihan/uigp-service/pkg/types"
 )
 
-// component/rectangle/node "Orders" as O
 var reComp = regexp.MustCompile(`(?i)^(component|rectangle|node)\s+"?([^"]+)"?\s*(?:as\s+([A-Za-z0-9_]+))?`)
 
-// O --> P : REST      or  "Orders" -right-> "Payments" : <<gRPC>>
 var reLink = regexp.MustCompile(`(?i)^("?[\w\s\-]+"?|[A-Za-z0-9_]+)\s*[-\.~]*[o]?>{1,2}\s*(?:left|right|up|down)?\s*("?[\w\s\-]+"?|[A-Za-z0-9_]+)\s*(?::\s*(.+))?$`)
 
-// stereotypes or bracketed protocol
 var reProto = regexp.MustCompile(`(?i)(?:<<\s*(grpc|rest|pub|sub)\s*>>|\[(grpc|rest|pub|sub)\])`)
 
 func ParsePUML(path string) (ParsedFile, error) {
@@ -43,7 +40,6 @@ func ParsePUML(path string) (ParsedFile, error) {
 		if l == "" || strings.HasPrefix(l, "'") {
 			continue
 		}
-		// components
 		if m := reComp.FindStringSubmatch(l); m != nil {
 			label := strings.TrimSpace(m[2])
 			alias := strings.TrimSpace(m[3])
@@ -55,7 +51,7 @@ func ParsePUML(path string) (ParsedFile, error) {
 			if !seen(id) {
 				nodes = append(nodes, types.Node{
 					ID:     id,
-					Type:   guessTypeFromLabel(label), // DB:, Q:, GW:
+					Type:   guessTypeFromLabel(label),
 					Label:  label,
 					Source: "puml",
 				})
@@ -63,14 +59,12 @@ func ParsePUML(path string) (ParsedFile, error) {
 			continue
 		}
 
-		// links
 		if m := reLink.FindStringSubmatch(l); m != nil {
-			from := cleanRef(m[1], idByLabel) // was m[1] (correct)
-			to := cleanRef(m[2], idByLabel)   // was m[3] (fix to m[2])
-			ann := strings.TrimSpace(m[3])    // was m[4] (fix to m[3])
+			from := cleanRef(m[1], idByLabel)
+			to := cleanRef(m[2], idByLabel)
+			ann := strings.TrimSpace(m[3])
 			proto := guessProtocolFromValue(ann)
 
-			// try stereotype/bracket capture if plain text missing
 			if proto == "" {
 				if pm := reProto.FindStringSubmatch(ann); pm != nil {
 					if pm[1] != "" {
@@ -86,7 +80,6 @@ func ParsePUML(path string) (ParsedFile, error) {
 
 	}
 
-	// If no nodes were declared but links referenced quoted labels, create nodes on the fly.
 	for lbl, id := range idByLabel {
 		if !seen(id) {
 			nodes = append(nodes, types.Node{ID: id, Type: guessTypeFromLabel(lbl), Label: lbl, Source: "puml"})
@@ -112,6 +105,6 @@ func cleanRef(s string, ids map[string]string) string {
 	if id, ok := ids[s]; ok {
 		return id
 	}
-	// if they referenced the label directly without defining component-as
+
 	return sanitizeID(s)
 }
