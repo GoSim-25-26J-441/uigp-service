@@ -88,6 +88,6 @@ func lite(ig types.IntermediateGraph, chat string) map[string]any {
 	}
 	if len(chat) > 400 {
 		chat = chat[:400]
-	} // trim long chat
+	}
 	return map[string]any{"services": labels, "links": edges, "chat": chat}
 }
