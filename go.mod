@@ -7,10 +7,4 @@ require (
 	github.com/joho/godotenv v1.5.1
 )
 
-require github.com/google/uuid v1.6.0
-
-require (
-	github.com/otiai10/gosseract/v2 v2.4.1 // indirect
-	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
+require github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
