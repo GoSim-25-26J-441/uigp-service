@@ -1,5 +1,6 @@
 # local settings
-.env
+**/.env
+**/.env.*
 
 # job data (never commit)
 /projects/*
