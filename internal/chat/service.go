@@ -150,21 +150,25 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 		"domain_strict": s.domainStrict,
 	})
 
-	if s.domainStrict && isOutOfScope(req, msg, s.domainKeywords) {
-		refusal := "I can only help with microservices architecture and performance. Ask about services, dependencies, APIs, data stores, scaling, latency, throughput, deployments, or share a diagram/spec."
-		return ChatResponse{
-			OK:     true,
-			Answer: refusal,
-			Source: SourceInfo{Provider: s.llm.Provider(), Model: s.llm.Model()},
-			Refs:   []any{},
-			Signals: mergeSignals(ctxSignals, map[string]any{
-				"out_of_scope": true,
-			}),
-			Meta: map[string]any{
-				"blocked":      true,
-				"latency_ms":   time.Since(start).Milliseconds(),
-				"context_used": ctxUsed,
-			},
+	if s.domainStrict {
+		out, reason := isOutOfScope(req, msg, s.domainKeywords)
+		if out {
+			refusal := "I can only help with microservices architecture and performance. Ask about services, dependencies, APIs, data stores, scaling, latency, throughput, deployments, or share a diagram/spec."
+			return ChatResponse{
+				OK:     true,
+				Answer: refusal,
+				Source: SourceInfo{Provider: s.llm.Provider(), Model: s.llm.Model()},
+				Refs:   []any{},
+				Signals: mergeSignals(ctxSignals, map[string]any{
+					"out_of_scope":        true,
+					"out_of_scope_reason": reason,
+				}),
+				Meta: map[string]any{
+					"blocked":      true,
+					"latency_ms":   time.Since(start).Milliseconds(),
+					"context_used": ctxUsed,
+				},
+			}
 		}
 	}
 
@@ -308,18 +312,64 @@ func mergeSignals(a, b map[string]any) map[string]any {
 	return out
 }
 
-func isOutOfScope(req ChatRequest, msg string, keywords []string) bool {
+func isOutOfScope(req ChatRequest, msg string, allowKeywords []string) (bool, string) {
 	if len(req.SpecSummary) > 0 || len(req.DiagramJSON) > 0 || len(req.Attachments) > 0 {
-		return false
+		return false, "has_arch_context"
 	}
-	m := strings.ToLower(msg)
-	for _, kw := range keywords {
+
+	m := strings.ToLower(strings.TrimSpace(msg))
+	if m == "" {
+		return true, "empty_message"
+	}
+
+	if isGreeting(m) {
+		return false, "greeting"
+	}
+
+	deny := []string{
+		"love poem", "poem", "lyrics", "song", "romance",
+		"write a story", "bedtime story",
+	}
+	if containsAny(m, deny) {
+		return true, "deny_keyword"
+	}
+
+	combined := m
+	for _, it := range req.History {
+		combined += " " + strings.ToLower(strings.TrimSpace(it.Content))
+	}
+
+	for _, kw := range allowKeywords {
+		kw = strings.ToLower(strings.TrimSpace(kw))
 		if kw == "" {
 			continue
 		}
-		if strings.Contains(m, strings.ToLower(strings.TrimSpace(kw))) {
-			return false
+		if strings.Contains(combined, kw) {
+			return false, "allow_keyword"
 		}
 	}
-	return true
+
+	return true, "no_allow_keyword"
+}
+
+func isGreeting(m string) bool {
+	switch strings.TrimSpace(m) {
+	case "hi", "hello", "hey", "yo", "sup", "good morning", "good afternoon", "good evening":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsAny(text string, phrases []string) bool {
+	for _, p := range phrases {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		if strings.Contains(text, p) {
+			return true
+		}
+	}
+	return false
 }

@@ -5,8 +5,6 @@ $BASE   = "http://localhost:8081"
 $APIKEY = "dev-key"
 $H      = @{ "X-API-Key" = $APIKEY }
 
-Write-Host "== UIGP API smoke tests =="
-
 function Pretty($obj, $depth=50) {
   $obj | ConvertTo-Json -Depth $depth
 }
@@ -16,6 +14,11 @@ function Pretty($obj, $depth=50) {
 # -------------------------
 Write-Host "`n--- GET /healthz (public) ---"
 Pretty (Invoke-RestMethod "$BASE/healthz") 20
+
+Response > {
+    "ok":  true,
+    "service":  "uigp-service"
+}
 
 # -------------------------
 # Ready (maybe public in your router; if protected, use header)
@@ -28,12 +31,38 @@ try {
   Pretty (Invoke-RestMethod "$BASE/readyz" -Headers $H) 20
 }
 
+Response > {
+    "model":  "llama3:instruct",
+    "ok":  true,
+    "provider":  "ollama"
+}
+
 # -------------------------
 # POST /api/v1/chat basic
 # -------------------------
 Write-Host "`n--- POST /api/v1/chat (basic) ---"
 $body = @{ message="hello"; history=@() } | ConvertTo-Json -Depth 20
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Response > {
+    "ok":  true,
+    "answer":  "Hi! I can help with microservices architecture/performance. Ask about services, dependencies, APIs, databases, scaling, latency, throughput, or share a diagram/spec.",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true,
+                    "greeting":  true
+                },
+    "meta":  {
+                 "context_used":  "none",
+                 "latency_ms":  0
+             }
+}
 
 # -------------------------
 # With chat history
@@ -48,6 +77,28 @@ $body = @{
   )
 } | ConvertTo-Json -Depth 50
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Response > {
+    "ok":  true,
+    "answer":  "With a peak of 200 RPS and a p95 of under 300ms, your services seem to be handling the load well. To further optimize, consider:\n\n1. **Caching**: Implement caching mechanisms (e.g., Redis or Memcached) for frequently accessed data to reduce database queries.\n2. **Kafka optimization**: Review Kafka configuration and partitioning to ensure efficient message processing and minimize latency.\n\nWhat specific area would you like me to expand on?",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true
+                },
+    "meta":  {
+                 "context_used":  "none",
+                 "history_used":  3,
+                 "latency_ms":  43862,
+                 "mode_invalid":  false,
+                 "mode_used":  "instant"
+             }
+}
 
 # -------------------------
 # With diagram_json
@@ -74,6 +125,30 @@ $body = @{
   }
 } | ConvertTo-Json -Depth 80
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 80
+
+Response > {
+    "ok":  true,
+    "answer":  "Based on the provided architecture context, I spot a potential gap:\n\n* There is no dependency mentioned between order-service and any other service or database.\n* It\u0027s unclear how order-service interacts with user-service, api-gateway, or db.\n\nTo clarify, please confirm or provide information about the following:\n1. How does order-service interact with user-service?\n2. Does order-service have a direct dependency on db (SQL) or indirectly through another service?",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "dependencies_count":  3,
+                    "domain_strict":  true,
+                    "services_count":  4
+                },
+    "meta":  {
+                 "context_used":  "diagram_json",
+                 "history_used":  0,
+                 "latency_ms":  43794,
+                 "mode_invalid":  false,
+                 "mode_used":  "thinking"
+             }
+}
 
 # -------------------------
 # With spec_summary (structured)
@@ -105,6 +180,28 @@ $body = @{
 } | ConvertTo-Json -Depth 80
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 80
 
+Response > {
+    "ok":  true,
+    "answer":  "To spot missing dependencies or gaps, I\u0027ll review the provided architecture context. Please provide the `spec_summary` information with the following format:\n\n```\n{\n  \"datastores\": [...],\n  \"dependencies\": [...],\n  \"services\": [...]\n}\n```\n\nOnce I have this information, I can help identify any missing dependencies or gaps in your microservices architecture.",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true
+                },
+    "meta":  {
+                 "context_used":  "spec_summary",
+                 "history_used":  0,
+                 "latency_ms":  26131,
+                 "mode_invalid":  false,
+                 "mode_used":  "thinking"
+             }
+}
+
 # -------------------------
 # Mode tests: instant / thinking / auto
 # -------------------------
@@ -112,17 +209,105 @@ Write-Host "`n--- POST /api/v1/chat (mode=instant) ---"
 $body = @{ message="Give 3 quick tips for p95 latency"; history=@(); mode="instant" } | ConvertTo-Json -Depth 20
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
 
+Response > {
+    "ok":  true,
+    "answer":  "Here are three quick tips to reduce p95 latency:\n\n1. **Optimize database queries**: Ensure that your database queries are efficient and well-indexed. This can significantly impact p95 latency, especially if you\u0027re dealing with large datasets.\n2. **Use caching**: Implement a caching layer (e.g., Redis or Memcached) to store frequently accessed data. This can help reduce the number of requests to your database and lower p95 latency.\n3. **Prioritize critical requests**: Identify the most critical requests that impact p95 latency and optimize those first. Focus on reducing the latency for these requests before moving on to less critical ones",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true
+                },
+    "meta":  {
+                 "context_used":  "none",
+                 "history_used":  0,
+                 "latency_ms":  52190,
+                 "mode_invalid":  false,
+                 "mode_used":  "instant"
+             }
+}
+
 Write-Host "`n--- POST /api/v1/chat (mode=thinking, detail=high) ---"
 $body = @{ message="Deeply analyze p95 latency causes in microservices"; history=@(); mode="thinking"; detail="high" } | ConvertTo-Json -Depth 20
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Response > {
+    "ok":  true,
+    "answer":  "P95 latency is a critical metric in microservices, as it measures the time taken to complete 95% of requests. Common causes of high p95 latency include:\n\n1. **Network delays**: Network congestion, packet loss, or high latency between services can significantly impact p95.\n2. **Database queries**: Complex or slow database queries can cause p95 latency spikes.\n3. **Service dependencies**: Long-lived connections or blocking calls to dependent services can increase p95.\n4. **CPU and memory constraints**: Resource-starved services can lead to increased p95.\n5. **Queueing and backpressure**: When a service is unable to process requests quickly enough, queues build up, causing p95 latency.\n\nTo analyze p95 latency causes, I recommend:\n\n* Collecting metrics on request latency, network traffic, database queries, and resource utilization\n* Identifying the most critical services and dependencies using tools like observability dashboards or tracing\n* Analyzing logs and error reports to pinpoint specific issues\n\nWhat would you like to know next?",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true
+                },
+    "meta":  {
+                 "context_used":  "none",
+                 "history_used":  0,
+                 "latency_ms":  77784,
+                 "mode_invalid":  false,
+                 "mode_used":  "thinking"
+             }
+}
 
 Write-Host "`n--- POST /api/v1/chat (mode=auto) ---"
 $body = @{ message="How to reduce p95 latency?"; history=@(); mode="auto" } | ConvertTo-Json -Depth 20
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
 
+Response > {
+    "ok":  true,
+    "answer":  "To reduce p95 latency, consider the following strategies:\n\n1. **Optimize database queries**: Ensure efficient query execution and minimize the number of queries.\n2. **Caching**: Implement caching mechanisms to reduce the load on your database and improve response times.\n3. **Load balancing**: Distribute incoming traffic across multiple instances to prevent overload and reduce latency.\n4. **Instance scaling**: Scale up or out your instances to handle increased loads and maintain performance.\n5. **Network optimization**: Optimize network configurations, such as TCP/IP settings and routing, for better packet transmission.\n\nWhich area would you like me to expand on?",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true
+                },
+    "meta":  {
+                 "context_used":  "none",
+                 "history_used":  0,
+                 "latency_ms":  50436,
+                 "mode_invalid":  false,
+                 "mode_used":  "instant"
+             }
+}
+
 Write-Host "`n--- POST /api/v1/chat (mode=invalid -> should fallback) ---"
 $body = @{ message="How to reduce p95 latency?"; history=@(); mode="fastest" } | ConvertTo-Json -Depth 20
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Response > {
+    "ok":  true,
+    "answer":  "To reduce p95 latency, consider the following strategies:\n\n1. **Optimize database queries**: Ensure efficient query execution, use caching, and minimize round-trips.\n2. **Improve network connectivity**: Enhance network infrastructure, optimize routing, and reduce packet loss.\n3. **Parallelize processing**: Break down complex tasks into smaller, parallelizable parts to distribute workload more efficiently.\n4. **Caching and memoization**: Store frequently accessed data in memory or cache layers to reduce database queries.\n5. **Monitor and analyze performance**: Use tools like Prometheus, Grafana, or New Relic to identify bottlenecks and optimize accordingly",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true
+                },
+    "meta":  {
+                 "context_used":  "none",
+                 "history_used":  0,
+                 "latency_ms":  41848,
+                 "mode_invalid":  true,
+                 "mode_used":  "base"
+             }
+}
 
 # -------------------------
 # Domain strict test (out-of-scope)
@@ -130,6 +315,28 @@ Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -Con
 Write-Host "`n--- POST /api/v1/chat (out-of-scope should be blocked when DOMAIN_STRICT=true) ---"
 $body = @{ message="Write me a love poem"; history=@() } | ConvertTo-Json -Depth 10
 Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Response > {
+    "ok":  true,
+    "answer":  "I can only help with microservices architecture and performance. Ask about services, dependencies, APIs, data stores, scaling, latency, throughput, deployments, or share a diagram/spec.",
+    "source":  {
+                   "provider":  "ollama",
+                   "model":  "llama3:instruct"
+               },
+    "refs":  [
+
+             ],
+    "signals":  {
+                    "domain_strict":  true,
+                    "out_of_scope":  true,
+                    "out_of_scope_reason":  "deny_keyword"
+                },
+    "meta":  {
+                 "blocked":  true,
+                 "context_used":  "none",
+                 "latency_ms":  0
+             }
+}
 
 # -------------------------
 # Security negative tests
@@ -140,7 +347,6 @@ try {
   Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -ContentType "application/json" -Body $body | Out-Null
   throw "Expected 401 but request succeeded"
 } catch {
-  # PowerShell sometimes throws string messages; try to extract status code safely
   try {
     $code = $_.Exception.Response.StatusCode.value__
     Write-Host "status=$code"
@@ -163,6 +369,8 @@ try {
   }
 }
 
+Response > status=401
+
 # -------------------------
 # Validation negative tests
 # -------------------------
@@ -176,10 +384,248 @@ try {
   Write-Host $_.Exception.Message
 }
 
+Response > The remote server returned an error: (400) Bad Request.
+
 # -------------------------
 # External: Ollama tags (optional)
 # -------------------------
 Write-Host "`n--- GET Ollama /api/tags (optional) ---"
 Pretty (Invoke-RestMethod "http://localhost:11434/api/tags") 50
 
-Write-Host "`n== DONE =="
+Response > {
+    "models":  [
+                   {
+                       "name":  "llama3:instruct",
+                       "model":  "llama3:instruct",
+                       "modified_at":  "2025-10-17T07:18:15.8294096+05:30",
+                       "size":  4661224676,
+                       "digest":  "365c0bd3c000a25d28ddbf732fe1c6add414de7275464c4e4d1c3b5fcb5d8ad1",
+                       "details":  {
+                                       "parent_model":  "",
+                                       "format":  "gguf",
+                                       "family":  "llama",
+                                       "families":  [
+                                                        "llama"
+                                                    ],
+                                       "parameter_size":  "8.0B",
+                                       "quantization_level":  "Q4_0"
+                                   }
+                   }
+               ]
+}
+
+
+## -------------------------------------------------APIs body structures ------------------------------------------------------
+
+## Minimal request body (just chat)
+
+{
+  "message": "How do I reduce p95 latency in microservices?",
+  "history": []
+}
+
+
+## With history (stateless memory: caller provides history)
+
+{
+  "message": "Given that, what should I improve first?",
+  "history": [
+    { "role": "user", "content": "We have 12 services, REST calls, Postgres, and Kafka." },
+    { "role": "assistant", "content": "Got it. Any latency or traffic targets?" },
+    { "role": "user", "content": "Peak is ~200 rps, p95 < 300ms." }
+  ]
+}
+
+
+## With mode + detail
+
+{
+  "message": "Give 3 quick tips to reduce p95 latency.",
+  "history": [],
+  "mode": "instant" | "thinking",
+  "detail": "low"
+}
+
+
+## Diagram JSON (Style A: nodes + edges)
+
+{
+  "message": "Spot missing dependencies or gaps.",
+  "history": [],
+  "diagram_json": {
+    "metadata": {
+      "diagram_version_id": "dv_0004",
+      "source": "upload",
+      "format": "json"
+    },
+    "nodes": [
+      { "id": "api", "label": "api-gateway", "type": "service" },
+      { "id": "u", "label": "user-service", "type": "service" },
+      { "id": "o", "label": "order-service", "type": "service" },
+      { "id": "db", "label": "postgres", "type": "db" },
+      { "id": "k", "label": "kafka", "type": "queue" }
+    ],
+    "edges": [
+      { "from": "api", "to": "u", "protocol": "REST" },
+      { "from": "api", "to": "o", "protocol": "REST" },
+      { "from": "u", "to": "db", "protocol": "SQL" },
+      { "from": "o", "to": "k", "protocol": "PUB" }
+    ]
+  }
+}
+
+
+## Diagram JSON (Style B: services + dependencies)
+
+{
+  "message": "Explain potential bottlenecks and missing links.",
+  "history": [],
+  "diagram_json": {
+    "metadata": {
+      "diagram_version_id": "dv_0007"
+    },
+    "services": [
+      { "name": "api-gateway", "type": "service" },
+      { "name": "user-service", "type": "service" },
+      { "name": "order-service", "type": "service" },
+      { "name": "postgres", "type": "datastore" },
+      { "name": "kafka", "type": "topic" }
+    ],
+    "dependencies": [
+      { "from": "api-gateway", "to": "user-service", "kind": "rest", "sync": true },
+      { "from": "api-gateway", "to": "order-service", "kind": "rest", "sync": true },
+      { "from": "user-service", "to": "postgres", "kind": "sql", "sync": true },
+      { "from": "order-service", "to": "kafka", "kind": "event", "sync": false }
+    ]
+  }
+}
+
+
+## Spec summary (quick hints for LLM)
+
+{
+  "message": "Spot missing dependencies or gaps.",
+  "history": [],
+  "spec_summary": {
+    "services": ["api-gateway", "user-service", "order-service", "postgres", "kafka"],
+    "dependencies": [
+      "api-gateway->user-service(rest)",
+      "api-gateway->order-service(rest)",
+      "user-service->postgres(db)",
+      "order-service->kafka(event)"
+    ],
+    "notes": {
+      "peak_rps": 200,
+      "p95_ms": 300
+    }
+  }
+}
+
+
+## Attachments (metadata only; no raw bytes)
+
+{
+  "message": "Check if the attached file implies any missing components.",
+  "history": [],
+  "attachments": [
+    {
+      "name": "architecture.pdf",
+      "content_type": "application/pdf",
+      "size_bytes": 345002,
+      "sha256": "d3b07384d113edec49eaa6238ad5ff00",
+      "kind": "diagram"
+    },
+    {
+      "name": "requirements.docx",
+      "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size_bytes": 120300,
+      "sha256": "9c56cc51b374c3ba189210d5b6d4bf57",
+      "kind": "requirements"
+    }
+  ]
+}
+
+
+## Full combined “best practice” body (main backend friendly)
+
+{
+  "message": "Review this architecture and suggest 5 improvements to reduce p95 latency.",
+  "mode": "thinking",
+  "detail": "high",
+  "history": [
+    { "role": "user", "content": "We expect peak ~200 rps and p95 under 300ms." },
+    { "role": "assistant", "content": "Any database or messaging details?" },
+    { "role": "user", "content": "Postgres + Kafka. Mostly REST between services." }
+  ],
+  "spec_summary": {
+    "services": ["api-gateway", "user-service", "order-service", "postgres", "kafka"],
+    "dependencies": [
+      "api-gateway->user-service(rest)",
+      "api-gateway->order-service(rest)",
+      "user-service->postgres(db)",
+      "order-service->kafka(event)"
+    ],
+    "notes": {
+      "peak_rps": 200,
+      "p95_ms": 300
+    }
+  },
+  "diagram_json": {
+    "metadata": { "diagram_version_id": "dv_0012" },
+    "nodes": [
+      { "id": "api", "label": "api-gateway", "type": "service" },
+      { "id": "u", "label": "user-service", "type": "service" },
+      { "id": "o", "label": "order-service", "type": "service" },
+      { "id": "db", "label": "postgres", "type": "db" },
+      { "id": "k", "label": "kafka", "type": "queue" }
+    ],
+    "edges": [
+      { "from": "api", "to": "u", "protocol": "REST" },
+      { "from": "api", "to": "o", "protocol": "REST" },
+      { "from": "u", "to": "db", "protocol": "SQL" },
+      { "from": "o", "to": "k", "protocol": "PUB" }
+    ]
+  },
+  "attachments": [
+    {
+      "name": "arch-v1.png",
+      "content_type": "image/png",
+      "size_bytes": 245120,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb924",
+      "kind": "diagram"
+    }
+  ]
+}
+
+
+## ------------------------------------------------- PowerShell quick tests --------------------------------------
+
+$BASE="http://localhost:8081"
+$H=@{ "X-API-Key"="dev-key" }
+
+# minimal
+$body = @{ message="How to reduce p95 latency?"; history=@() } | ConvertTo-Json -Depth 30
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 30
+
+
+# with diagram_json
+$body = @{
+  message="Spot missing dependencies or gaps."
+  history=@()
+  diagram_json=@{
+    metadata=@{ diagram_version_id="dv_0004" }
+    nodes=@(
+      @{ id="api"; label="api-gateway"; type="service" },
+      @{ id="u"; label="user-service"; type="service" },
+      @{ id="o"; label="order-service"; type="service" },
+      @{ id="db"; label="postgres"; type="db" }
+    )
+    edges=@(
+      @{ from="api"; to="u"; protocol="REST" },
+      @{ from="api"; to="o"; protocol="REST" },
+      @{ from="u"; to="db"; protocol="SQL" }
+    )
+  }
+} | ConvertTo-Json -Depth 80
+
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 30

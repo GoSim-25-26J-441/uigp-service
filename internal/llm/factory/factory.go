@@ -5,11 +5,14 @@ import (
 
 	"github.com/MalithGihan/uigp-service/internal/config"
 	"github.com/MalithGihan/uigp-service/internal/llm"
+	"github.com/MalithGihan/uigp-service/internal/llm/fake"
 	"github.com/MalithGihan/uigp-service/internal/llm/ollama"
 )
 
 func NewClientFromConfig(cfg config.Config) (llm.Client, error) {
 	switch cfg.LLMProvider {
+	case "fake":
+		return fake.New(), nil
 	case "", "ollama":
 		return ollama.NewClient(ollama.Config{
 			BaseURL:      cfg.OllamaURL,
