@@ -29,12 +29,28 @@ func main() {
 		MaxHistoryChars: cfg.MaxHistoryChars,
 		LLMConcurrency:  cfg.LLMConcurrency,
 
-		Temperature: cfg.OllamaTemperature,
-		NumCtx:      cfg.OllamaNumCtx,
-		NumPredict:  cfg.OllamaNumPredict,
-
 		DomainStrict:   cfg.DomainStrict,
 		DomainKeywords: cfg.DomainKeywords,
+
+		BaseProfile: chat.LLMProfile{
+			Temperature: cfg.OllamaTemperature,
+			NumCtx:      cfg.OllamaNumCtx,
+			NumPredict:  cfg.OllamaNumPredict,
+		},
+
+		ModeDefault: cfg.ChatModeDefault,
+
+		InstantProfile: chat.LLMProfile{
+			Temperature: cfg.ChatInstantTemperature,
+			NumCtx:      cfg.ChatInstantNumCtx,
+			NumPredict:  cfg.ChatInstantNumPredict,
+		},
+
+		ThinkingProfile: chat.LLMProfile{
+			Temperature: cfg.ChatThinkingTemperature,
+			NumCtx:      cfg.ChatThinkingNumCtx,
+			NumPredict:  cfg.ChatThinkingNumPredict,
+		},
 	})
 
 	handler := httpapi.NewRouter(cfg, llmClient, chatSvc)

@@ -1,0 +1,185 @@
+# scripts/test-api.ps1
+$ErrorActionPreference = "Stop"
+
+$BASE   = "http://localhost:8081"
+$APIKEY = "dev-key"
+$H      = @{ "X-API-Key" = $APIKEY }
+
+Write-Host "== UIGP API smoke tests =="
+
+function Pretty($obj, $depth=50) {
+  $obj | ConvertTo-Json -Depth $depth
+}
+
+# -------------------------
+# Health (public)
+# -------------------------
+Write-Host "`n--- GET /healthz (public) ---"
+Pretty (Invoke-RestMethod "$BASE/healthz") 20
+
+# -------------------------
+# Ready (maybe public in your router; if protected, use header)
+# -------------------------
+Write-Host "`n--- GET /readyz ---"
+try {
+  Pretty (Invoke-RestMethod "$BASE/readyz") 20
+} catch {
+  Write-Host "readyz failed without key. Trying with X-API-Key..."
+  Pretty (Invoke-RestMethod "$BASE/readyz" -Headers $H) 20
+}
+
+# -------------------------
+# POST /api/v1/chat basic
+# -------------------------
+Write-Host "`n--- POST /api/v1/chat (basic) ---"
+$body = @{ message="hello"; history=@() } | ConvertTo-Json -Depth 20
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+# -------------------------
+# With chat history
+# -------------------------
+Write-Host "`n--- POST /api/v1/chat (with history) ---"
+$body = @{
+  message = "What should I improve?"
+  history = @(
+    @{ role="user"; content="We have 12 services, REST calls, Postgres, and Kafka." },
+    @{ role="assistant"; content="Got it. Any latency or traffic targets?" },
+    @{ role="user"; content="Peak is ~200 rps, p95 < 300ms." }
+  )
+} | ConvertTo-Json -Depth 50
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+# -------------------------
+# With diagram_json
+# -------------------------
+Write-Host "`n--- POST /api/v1/chat (with diagram_json) ---"
+$body = @{
+  message = "Spot missing dependencies or gaps."
+  history = @()
+  mode    = "thinking"
+  detail  = "high"
+  diagram_json = @{
+    metadata = @{ diagram_version_id="dv_0004" }
+    nodes = @(
+      @{ id="api"; label="api-gateway" },
+      @{ id="u";   label="user-service" },
+      @{ id="o";   label="order-service" },
+      @{ id="db";  label="postgres" }
+    )
+    edges = @(
+      @{ from="api"; to="u"; protocol="REST" },
+      @{ from="api"; to="o"; protocol="REST" },
+      @{ from="u";   to="db"; protocol="SQL" }
+    )
+  }
+} | ConvertTo-Json -Depth 80
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 80
+
+# -------------------------
+# With spec_summary (structured)
+# NOTE: your current context builder for spec_summary is very light (keys only),
+# so add enough structure and set detail=high to reduce "please provide" behavior.
+# -------------------------
+Write-Host "`n--- POST /api/v1/chat (with spec_summary) ---"
+$body = @{
+  message = "Spot missing dependencies or gaps."
+  history = @()
+  mode    = "thinking"
+  detail  = "high"
+  spec_summary = @{
+    services = @(
+      @{ name="api-gateway"; type="service" },
+      @{ name="user-service"; type="service" },
+      @{ name="order-service"; type="service" },
+      @{ name="postgres"; type="datastore" }
+    )
+    dependencies = @(
+      @{ from="api-gateway"; to="user-service"; kind="rest"; sync=$true },
+      @{ from="api-gateway"; to="order-service"; kind="rest"; sync=$true }
+      # intentionally missing order-service -> postgres to see if model catches it
+    )
+    datastores = @(
+      @{ name="postgres"; engine="postgresql"; ownerService=$null }
+    )
+  }
+} | ConvertTo-Json -Depth 80
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 80
+
+# -------------------------
+# Mode tests: instant / thinking / auto
+# -------------------------
+Write-Host "`n--- POST /api/v1/chat (mode=instant) ---"
+$body = @{ message="Give 3 quick tips for p95 latency"; history=@(); mode="instant" } | ConvertTo-Json -Depth 20
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Write-Host "`n--- POST /api/v1/chat (mode=thinking, detail=high) ---"
+$body = @{ message="Deeply analyze p95 latency causes in microservices"; history=@(); mode="thinking"; detail="high" } | ConvertTo-Json -Depth 20
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Write-Host "`n--- POST /api/v1/chat (mode=auto) ---"
+$body = @{ message="How to reduce p95 latency?"; history=@(); mode="auto" } | ConvertTo-Json -Depth 20
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+Write-Host "`n--- POST /api/v1/chat (mode=invalid -> should fallback) ---"
+$body = @{ message="How to reduce p95 latency?"; history=@(); mode="fastest" } | ConvertTo-Json -Depth 20
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+# -------------------------
+# Domain strict test (out-of-scope)
+# -------------------------
+Write-Host "`n--- POST /api/v1/chat (out-of-scope should be blocked when DOMAIN_STRICT=true) ---"
+$body = @{ message="Write me a love poem"; history=@() } | ConvertTo-Json -Depth 10
+Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+
+# -------------------------
+# Security negative tests
+# -------------------------
+Write-Host "`n--- SECURITY: missing api key (should 401) ---"
+$body = @{ message="hello"; history=@() } | ConvertTo-Json -Depth 10
+try {
+  Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -ContentType "application/json" -Body $body | Out-Null
+  throw "Expected 401 but request succeeded"
+} catch {
+  # PowerShell sometimes throws string messages; try to extract status code safely
+  try {
+    $code = $_.Exception.Response.StatusCode.value__
+    Write-Host "status=$code"
+  } catch {
+    Write-Host $_.Exception.Message
+  }
+}
+
+Write-Host "`n--- SECURITY: wrong api key (should 401) ---"
+$badH = @{ "X-API-Key" = "wrong-key" }
+try {
+  Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $badH -ContentType "application/json" -Body $body | Out-Null
+  throw "Expected 401 but request succeeded"
+} catch {
+  try {
+    $code = $_.Exception.Response.StatusCode.value__
+    Write-Host "status=$code"
+  } catch {
+    Write-Host $_.Exception.Message
+  }
+}
+
+# -------------------------
+# Validation negative tests
+# -------------------------
+Write-Host "`n--- VALIDATION: message required (should 400 JSON) ---"
+$body = @{ message=""; history=@() } | ConvertTo-Json -Depth 10
+try {
+  Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | Out-Null
+  throw "Expected 400 but request succeeded"
+} catch {
+  # your handler returns JSON with status 400; Invoke-RestMethod throws on 400
+  Write-Host $_.Exception.Message
+}
+
+# -------------------------
+# External: Ollama tags (optional)
+# -------------------------
+Write-Host "`n--- GET Ollama /api/tags (optional) ---"
+Pretty (Invoke-RestMethod "http://localhost:11434/api/tags") 50
+
+Write-Host "`n== DONE =="

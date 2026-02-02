@@ -36,7 +36,5 @@ func NewRouter(cfg config.Config, llmClient llm.Client, chatSvc *chat.Service) h
 		v1.Post("/chat", ch.Chat)
 	})
 
-	r.Post("/chat", ch.Chat)
-
 	return r
 }

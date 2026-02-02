@@ -13,6 +13,8 @@ type ChatRequest struct {
 	Attachments []types.Attachment `json:"attachments"`
 	History     []HistoryItem      `json:"history"`
 	Message     string             `json:"message"`
+	Mode        string             `json:"mode,omitempty"`
+	Detail      string             `json:"detail,omitempty"`
 }
 
 type SourceInfo struct {

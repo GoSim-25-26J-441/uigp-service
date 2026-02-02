@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -20,7 +21,7 @@ type Config struct {
 	MaxHistoryChars int
 	LLMConcurrency  int
 
-	LLMProvider   string // "ollama" now, later "openai", etc.
+	LLMProvider   string
 	OllamaURL     string
 	OllamaModel   string
 	OllamaTimeout time.Duration
@@ -31,14 +32,24 @@ type Config struct {
 	OllamaNumCtx      int
 	OllamaNumPredict  int
 	OllamaTemperature float64
+
+	ChatModeDefault string
+
+	ChatInstantNumCtx      int
+	ChatInstantNumPredict  int
+	ChatInstantTemperature float64
+
+	ChatThinkingNumCtx      int
+	ChatThinkingNumPredict  int
+	ChatThinkingTemperature float64
 }
 
 func Load() Config {
-	return Config{
+	cfg := Config{
 		Port: getenv("PORT", "8081"),
 
 		APIKey:       os.Getenv("UIGP_API_KEY"),
-		MaxBodyBytes: getenvInt64("MAX_BODY_BYTES", 8<<20), // 8MB
+		MaxBodyBytes: getenvInt64("MAX_BODY_BYTES", 8<<20),
 
 		ReadTimeout:  getenvDuration("READ_TIMEOUT", 10*time.Second),
 		WriteTimeout: getenvDuration("WRITE_TIMEOUT", 120*time.Second),
@@ -53,10 +64,36 @@ func Load() Config {
 		OllamaModel:   getenv("OLLAMA_MODEL", "llama3:instruct"),
 		OllamaTimeout: getenvDuration("OLLAMA_TIMEOUT", 60*time.Second),
 
+		DomainStrict: getenvBool("DOMAIN_STRICT", false),
+
+		DomainKeywords: getenvCSV("DOMAIN_KEYWORDS"),
+
 		OllamaNumCtx:      getenvInt("OLLAMA_NUM_CTX", 2048),
 		OllamaNumPredict:  getenvInt("OLLAMA_NUM_PREDICT", 512),
 		OllamaTemperature: getenvFloat("OLLAMA_TEMPERATURE", 0.2),
+
+		ChatModeDefault: getenv("CHAT_MODE_DEFAULT", "auto"),
+
+		ChatInstantNumCtx:      getenvInt("CHAT_INSTANT_NUM_CTX", 1024),
+		ChatInstantNumPredict:  getenvInt("CHAT_INSTANT_NUM_PREDICT", 128),
+		ChatInstantTemperature: getenvFloat("CHAT_INSTANT_TEMPERATURE", 0.2),
+
+		ChatThinkingNumCtx:      getenvInt("CHAT_THINKING_NUM_CTX", 2048),
+		ChatThinkingNumPredict:  getenvInt("CHAT_THINKING_NUM_PREDICT", 384),
+		ChatThinkingTemperature: getenvFloat("CHAT_THINKING_TEMPERATURE", 0.2),
 	}
+
+	if cfg.ChatInstantNumCtx == 0 {
+		cfg.ChatInstantNumCtx = cfg.OllamaNumCtx
+	}
+	if cfg.ChatInstantNumPredict == 0 {
+		cfg.ChatInstantNumPredict = cfg.OllamaNumPredict
+	}
+	if cfg.ChatInstantTemperature == 0 {
+		cfg.ChatInstantTemperature = cfg.OllamaTemperature
+	}
+
+	return cfg
 }
 
 func getenv(k, def string) string {
@@ -108,4 +145,35 @@ func getenvDuration(k string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func getenvCSV(k string) []string {
+	v := os.Getenv(k)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func getenvBool(k string, def bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(k)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return def
+	}
 }

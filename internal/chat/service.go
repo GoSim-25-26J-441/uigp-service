@@ -9,17 +9,26 @@ import (
 	"github.com/MalithGihan/uigp-service/internal/llm"
 )
 
+type LLMProfile struct {
+	Temperature float64
+	NumCtx      int
+	NumPredict  int
+}
+
 type ServiceDeps struct {
 	LLM             llm.Client
 	MaxHistoryItems int
 	MaxHistoryChars int
 	LLMConcurrency  int
-	DomainStrict    bool
-	DomainKeywords  []string
 
-	Temperature float64
-	NumCtx      int
-	NumPredict  int
+	DomainStrict   bool
+	DomainKeywords []string
+
+	BaseProfile LLMProfile
+
+	ModeDefault     string
+	InstantProfile  LLMProfile
+	ThinkingProfile LLMProfile
 }
 
 type Service struct {
@@ -27,12 +36,14 @@ type Service struct {
 	maxHistoryItems int
 	maxHistoryChars int
 	sem             chan struct{}
-	domainStrict    bool
-	domainKeywords  []string
 
-	temperature float64
-	numCtx      int
-	numPredict  int
+	domainStrict   bool
+	domainKeywords []string
+
+	modeDefault     string
+	baseProfile     LLMProfile
+	instantProfile  LLMProfile
+	thinkingProfile LLMProfile
 }
 
 func NewService(d ServiceDeps) *Service {
@@ -41,17 +52,42 @@ func NewService(d ServiceDeps) *Service {
 		c = 1
 	}
 
-	temp := d.Temperature
-	if temp == 0 {
-		temp = 0.2
+	base := d.BaseProfile
+	if base.Temperature == 0 {
+		base.Temperature = 0.2
 	}
-	nc := d.NumCtx
-	if nc <= 0 {
-		nc = 1024
+	if base.NumCtx <= 0 {
+		base.NumCtx = 1024
 	}
-	np := d.NumPredict
-	if np <= 0 {
-		np = 256
+	if base.NumPredict <= 0 {
+		base.NumPredict = 256
+	}
+
+	instant := d.InstantProfile
+	if instant.Temperature == 0 {
+		instant.Temperature = base.Temperature
+	}
+	if instant.NumCtx <= 0 {
+		instant.NumCtx = base.NumCtx
+	}
+	if instant.NumPredict <= 0 {
+		instant.NumPredict = base.NumPredict
+	}
+
+	thinking := d.ThinkingProfile
+	if thinking.Temperature == 0 {
+		thinking.Temperature = base.Temperature
+	}
+	if thinking.NumCtx <= 0 {
+		thinking.NumCtx = base.NumCtx
+	}
+	if thinking.NumPredict <= 0 {
+		thinking.NumPredict = base.NumPredict
+	}
+
+	md := strings.ToLower(strings.TrimSpace(d.ModeDefault))
+	if md == "" {
+		md = "auto"
 	}
 
 	return &Service{
@@ -60,12 +96,35 @@ func NewService(d ServiceDeps) *Service {
 		maxHistoryChars: d.MaxHistoryChars,
 		sem:             make(chan struct{}, c),
 
-		temperature: temp,
-		numCtx:      nc,
-		numPredict:  np,
-
 		domainStrict:   d.DomainStrict,
 		domainKeywords: d.DomainKeywords,
+
+		modeDefault:     md,
+		baseProfile:     base,
+		instantProfile:  instant,
+		thinkingProfile: thinking,
+	}
+}
+
+func (s *Service) pickProfile(req ChatRequest, ctxUsed string, historyUsed int) (LLMProfile, string, bool) {
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = s.modeDefault
+	}
+
+	switch mode {
+	case "instant":
+		return s.instantProfile, "instant", false
+	case "thinking":
+		return s.thinkingProfile, "thinking", false
+	case "auto":
+		detail := strings.ToLower(strings.TrimSpace(req.Detail))
+		if ctxUsed != "none" || detail == "high" || detail == "detailed" || historyUsed >= 6 || len(req.Message) > 180 {
+			return s.thinkingProfile, "thinking", false
+		}
+		return s.instantProfile, "instant", false
+	default:
+		return s.baseProfile, "base", true
 	}
 }
 
@@ -143,10 +202,12 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 		}
 	}
 
+	profile, modeUsed, modeInvalid := s.pickProfile(req, ctxUsed, len(h))
+
 	opts := map[string]any{
-		"temperature": s.temperature,
-		"num_ctx":     s.numCtx,
-		"num_predict": s.numPredict,
+		"temperature": profile.Temperature,
+		"num_ctx":     profile.NumCtx,
+		"num_predict": profile.NumPredict,
 	}
 
 	answer, err := s.llm.Chat(ctx, llm.ChatRequest{
@@ -182,6 +243,8 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 			"latency_ms":   time.Since(start).Milliseconds(),
 			"context_used": ctxUsed,
 			"history_used": len(h),
+			"mode_used":    modeUsed,
+			"mode_invalid": modeInvalid,
 		},
 	}
 }
