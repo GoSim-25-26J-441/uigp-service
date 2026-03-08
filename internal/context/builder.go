@@ -15,41 +15,113 @@ func BuildCompactContext(
 
 	signals = map[string]any{}
 
-	if specSummary != nil && len(specSummary) > 0 {
-		return compactFromMap("spec_summary", specSummary), "spec_summary", signals
-	}
+	var blocks []string
+	var usedParts []string
+
+	// Prefer diagram_json first (more ground truth), but include spec_summary too if provided.
 	if diagramJSON != nil && len(diagramJSON) > 0 {
 		t, sig := compactFromDiagram(diagramJSON)
 		for k, v := range sig {
 			signals[k] = v
 		}
-		return t, "diagram_json", signals
+		if strings.TrimSpace(t) != "" {
+			blocks = append(blocks, "DIAGRAM CONTEXT:\n"+t)
+			usedParts = append(usedParts, "diagram_json")
+		}
 	}
+
+	if specSummary != nil && len(specSummary) > 0 {
+		t, sig := compactFromSpecSummary(specSummary)
+		for k, v := range sig {
+			signals[k] = v
+		}
+		if strings.TrimSpace(t) != "" {
+			blocks = append(blocks, "SPEC SUMMARY:\n"+t)
+			usedParts = append(usedParts, "spec_summary")
+		}
+	}
+
 	if len(atts) > 0 {
 		var lines []string
 		for _, a := range atts {
 			lines = append(lines, fmt.Sprintf("- %s (%s)", a.Name, a.ContentType))
 		}
 		signals["attachments_detected"] = len(atts)
-		return "Attachments provided:\n" + strings.Join(lines, "\n"), "attachments", signals
+		blocks = append(blocks, "ATTACHMENTS:\n"+strings.Join(lines, "\n"))
+		usedParts = append(usedParts, "attachments")
 	}
 
-	return "", "none", signals
+	if len(blocks) == 0 {
+		return "", "none", signals
+	}
+	return strings.Join(blocks, "\n\n"), strings.Join(usedParts, "+"), signals
 }
 
-func compactFromMap(label string, m map[string]any) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+// Instead of “keys only”, show useful content (services/dependencies/datastores if present).
+func compactFromSpecSummary(m map[string]any) (string, map[string]any) {
+	sig := map[string]any{}
+
+	services := readStringList(m["services"])
+	deps := readStringList(m["dependencies"])
+	datastores := readStringList(m["datastores"])
+
+	sig["spec_services_count"] = len(services)
+	sig["spec_dependencies_count"] = len(deps)
+	sig["spec_datastores_count"] = len(datastores)
+
+	var b strings.Builder
+	if len(services) > 0 {
+		b.WriteString("Services:\n")
+		for _, s := range services {
+			b.WriteString("- " + s + "\n")
+		}
 	}
-	return fmt.Sprintf("%s keys: %v\n(Provide more structure in spec_summary for best results.)", label, keys)
+	if len(deps) > 0 {
+		b.WriteString("Dependencies:\n")
+		for _, d := range deps {
+			b.WriteString("- " + d + "\n")
+		}
+	}
+	if len(datastores) > 0 {
+		b.WriteString("Datastores:\n")
+		for _, d := range datastores {
+			b.WriteString("- " + d + "\n")
+		}
+	}
+
+	// fallback if user sent unexpected schema
+	if b.Len() == 0 {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		b.WriteString(fmt.Sprintf("spec_summary provided (keys: %v).", keys))
+	}
+
+	return strings.TrimSpace(b.String()), sig
 }
 
 func compactFromDiagram(m map[string]any) (string, map[string]any) {
 	sig := map[string]any{}
+
+	// Build id->label map so edges print labels instead of ids
+	idToLabel := map[string]string{}
+	if nv, ok := m["nodes"].([]any); ok {
+		for _, v := range nv {
+			if nm, ok := v.(map[string]any); ok {
+				id := fmt.Sprint(nm["id"])
+				lbl := fmt.Sprint(nm["label"])
+				if id != "" && id != "<nil>" && lbl != "" && lbl != "<nil>" {
+					idToLabel[id] = lbl
+				}
+			}
+		}
+	}
+
 	var services []string
 	var deps []string
 
+	// support both “services/dependencies” and “nodes/edges”
 	if sv, ok := m["services"].([]any); ok {
 		for _, v := range sv {
 			switch t := v.(type) {
@@ -77,7 +149,14 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		if nv, ok := m["nodes"].([]any); ok {
 			for _, v := range nv {
 				if nm, ok := v.(map[string]any); ok {
-					if lbl, ok := nm["label"].(string); ok {
+					lbl := fmt.Sprint(nm["label"])
+					typ := fmt.Sprint(nm["type"])
+					if lbl == "" || lbl == "<nil>" {
+						continue
+					}
+					if typ != "" && typ != "<nil>" {
+						services = append(services, fmt.Sprintf("%s (%s)", lbl, typ))
+					} else {
 						services = append(services, lbl)
 					}
 				}
@@ -91,6 +170,13 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 					from := fmt.Sprint(em["from"])
 					to := fmt.Sprint(em["to"])
 					proto := fmt.Sprint(em["protocol"])
+
+					if lbl, ok := idToLabel[from]; ok {
+						from = lbl
+					}
+					if lbl, ok := idToLabel[to]; ok {
+						to = lbl
+					}
 					deps = append(deps, fmt.Sprintf("%s -> %s (%s)", from, to, proto))
 				}
 			}
@@ -100,15 +186,26 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 	sig["services_count"] = len(services)
 	sig["dependencies_count"] = len(deps)
 
+	// include diagram_version_id if present
+	if md, ok := m["metadata"].(map[string]any); ok {
+		dv := fmt.Sprint(md["diagram_version_id"])
+		if dv != "" && dv != "<nil>" {
+			sig["diagram_version_id"] = dv
+		}
+	}
+
 	var b strings.Builder
+	if dv, ok := sig["diagram_version_id"].(string); ok && dv != "" {
+		b.WriteString("Diagram version: " + dv + "\n")
+	}
 	if len(services) > 0 {
-		b.WriteString("Services:\n")
+		b.WriteString("Nodes:\n")
 		for _, s := range services {
 			b.WriteString("- " + s + "\n")
 		}
 	}
 	if len(deps) > 0 {
-		b.WriteString("Dependencies:\n")
+		b.WriteString("Edges:\n")
 		for _, d := range deps {
 			b.WriteString("- " + d + "\n")
 		}
@@ -116,5 +213,21 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 	if b.Len() == 0 {
 		b.WriteString("Diagram JSON provided but no known keys found (expected services/dependencies or nodes/edges).")
 	}
-	return b.String(), sig
+	return strings.TrimSpace(b.String()), sig
+}
+
+func readStringList(v any) []string {
+	var out []string
+	switch t := v.(type) {
+	case []string:
+		return append(out, t...)
+	case []any:
+		for _, x := range t {
+			s := strings.TrimSpace(fmt.Sprint(x))
+			if s != "" && s != "<nil>" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
 }
