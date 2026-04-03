@@ -182,8 +182,10 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 	}
 	if ctxText != "" {
 		llmMsgs = append(llmMsgs, llm.Message{
-			Role:    "system",
-			Content: "Architecture context (treat as factual input):\n" + ctxText,
+			Role: "system",
+			Content: "Architecture context for this request only (from the current API payload: diagram_json, spec_summary, etc.). " +
+				"It was not necessarily sent in previous chat turns—do not tell the user the diagram or spec was 'provided earlier' in the conversation unless they literally pasted it in a message. " +
+				"Treat the following as factual input:\n" + ctxText,
 		})
 	}
 	if contextUsesDiagram(ctxUsed) {

@@ -164,13 +164,10 @@ $body = @{
     services = @(
       @{ name="api-gateway"; type="service" },
       @{ name="user-service"; type="service" },
-      @{ name="order-service"; type="service" },
-      @{ name="postgres"; type="datastore" }
+      @{ name="order-service"; type="service" }
     )
     dependencies = @(
-      @{ from="api-gateway"; to="user-service"; kind="rest"; sync=$true },
-      @{ from="api-gateway"; to="order-service"; kind="rest"; sync=$true }
-      # intentionally missing order-service -> postgres to see if model catches it
+      @{ from="api-gateway"; to="user-service"; kind="rest"; sync=$true }
     )
     datastores = @(
       @{ name="postgres"; engine="postgresql"; ownerService=$null }

@@ -23,7 +23,9 @@ If additional system instructions appear after the architecture context, follow 
 func diagramArchitectureSystemPrompt() string {
 	return `Diagram and architecture graph instructions (the Architecture context message above may include a DIAGRAM CONTEXT section):
 
+- Wording: say the diagram is attached with this request, or "in the diagram below / in the context above"—not "earlier in the chat" unless the user actually included it in prior messages.
 - Treat DIAGRAM CONTEXT as authoritative for structure. Listed nodes/components are elements of the system; edges are dependencies or data/call flow between them.
+- List every node; if a node has no edges in the context, state that it appears disconnected (that is a gap).
 - Under Observed, state only what the context explicitly shows. Do not invent services, edges, or protocols that are not represented.
 - For gaps and suggestions, you may apply common microservices reasoning: data ownership and missing datastore edges, sync vs async or messaging, API entry/gateway, authN/Z, observability, failure isolation and single points of failure, unclear or missing protocols on edges, orphan or suspiciously disconnected nodes.
 - If the context states that the diagram JSON had no recognized shape, briefly note that you expected nodes/edges (id, label, optional type; protocol on edges) or services/dependencies—and do not ask for a different format unless that message appears.
