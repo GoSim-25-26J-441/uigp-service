@@ -1,19 +1,18 @@
-# scripts/test-api.ps1
+# PowerShell API examples (paste into a session or save as .ps1). Uses ConvertTo-Json for output; no Pretty helper.
 $ErrorActionPreference = "Stop"
 
 $BASE   = "http://localhost:8081"
 $APIKEY = "dev-key"
 $H      = @{ "X-API-Key" = $APIKEY }
 
-function Pretty($obj, $depth=50) {
-  $obj | ConvertTo-Json -Depth $depth
-}
+# Output JSON: pipe Invoke-RestMethod to ConvertTo-Json (no helper required), e.g.:
+#   Invoke-RestMethod "$BASE/healthz" | ConvertTo-Json -Depth 20
 
 # -------------------------
 # Health (public)
 # -------------------------
 Write-Host "`n--- GET /healthz (public) ---"
-Pretty (Invoke-RestMethod "$BASE/healthz") 20
+Invoke-RestMethod "$BASE/healthz" | ConvertTo-Json -Depth 20
 
 Response > {
     "ok":  true,
@@ -25,10 +24,10 @@ Response > {
 # -------------------------
 Write-Host "`n--- GET /readyz ---"
 try {
-  Pretty (Invoke-RestMethod "$BASE/readyz") 20
+  Invoke-RestMethod "$BASE/readyz" | ConvertTo-Json -Depth 20
 } catch {
   Write-Host "readyz failed without key. Trying with X-API-Key..."
-  Pretty (Invoke-RestMethod "$BASE/readyz" -Headers $H) 20
+  Invoke-RestMethod "$BASE/readyz" -Headers $H | ConvertTo-Json -Depth 20
 }
 
 Response > {
@@ -42,7 +41,7 @@ Response > {
 # -------------------------
 Write-Host "`n--- POST /api/v1/chat (basic) ---"
 $body = @{ message="hello"; history=@() } | ConvertTo-Json -Depth 20
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -76,7 +75,7 @@ $body = @{
     @{ role="user"; content="Peak is ~200 rps, p95 < 300ms." }
   )
 } | ConvertTo-Json -Depth 50
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -124,7 +123,7 @@ $body = @{
     )
   }
 } | ConvertTo-Json -Depth 80
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 80
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 80
 
 Response > {
     "ok":  true,
@@ -178,7 +177,7 @@ $body = @{
     )
   }
 } | ConvertTo-Json -Depth 80
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 80
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 80
 
 Response > {
     "ok":  true,
@@ -207,7 +206,7 @@ Response > {
 # -------------------------
 Write-Host "`n--- POST /api/v1/chat (mode=instant) ---"
 $body = @{ message="Give 3 quick tips for p95 latency"; history=@(); mode="instant" } | ConvertTo-Json -Depth 20
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -233,7 +232,7 @@ Response > {
 
 Write-Host "`n--- POST /api/v1/chat (mode=thinking, detail=high) ---"
 $body = @{ message="Deeply analyze p95 latency causes in microservices"; history=@(); mode="thinking"; detail="high" } | ConvertTo-Json -Depth 20
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -259,7 +258,7 @@ Response > {
 
 Write-Host "`n--- POST /api/v1/chat (mode=auto) ---"
 $body = @{ message="How to reduce p95 latency?"; history=@(); mode="auto" } | ConvertTo-Json -Depth 20
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -285,7 +284,7 @@ Response > {
 
 Write-Host "`n--- POST /api/v1/chat (mode=invalid -> should fallback) ---"
 $body = @{ message="How to reduce p95 latency?"; history=@(); mode="fastest" } | ConvertTo-Json -Depth 20
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -314,7 +313,7 @@ Response > {
 # -------------------------
 Write-Host "`n--- POST /api/v1/chat (out-of-scope should be blocked when DOMAIN_STRICT=true) ---"
 $body = @{ message="Write me a love poem"; history=@() } | ConvertTo-Json -Depth 10
-Pretty (Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body) 50
+Invoke-RestMethod -Method Post -Uri "$BASE/api/v1/chat" -Headers $H -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 50
 
 Response > {
     "ok":  true,
@@ -390,7 +389,7 @@ Response > The remote server returned an error: (400) Bad Request.
 # External: Ollama tags (optional)
 # -------------------------
 Write-Host "`n--- GET Ollama /api/tags (optional) ---"
-Pretty (Invoke-RestMethod "http://localhost:11434/api/tags") 50
+Invoke-RestMethod "http://localhost:11434/api/tags" | ConvertTo-Json -Depth 50
 
 Response > {
     "models":  [
