@@ -52,8 +52,9 @@ func Load() Config {
 		MaxBodyBytes: getenvInt64("MAX_BODY_BYTES", 8<<20),
 
 		ReadTimeout:  getenvDuration("READ_TIMEOUT", 10*time.Second),
-		WriteTimeout: getenvDuration("WRITE_TIMEOUT", 120*time.Second),
-		IdleTimeout:  getenvDuration("IDLE_TIMEOUT", 60*time.Second),
+		// Must exceed OLLAMA_TIMEOUT so the handler can finish after the LLM returns.
+		WriteTimeout: getenvDuration("WRITE_TIMEOUT", 240*time.Second),
+		IdleTimeout:  getenvDuration("IDLE_TIMEOUT", 120*time.Second),
 
 		MaxHistoryItems: getenvInt("MAX_HISTORY_ITEMS", 20),
 		MaxHistoryChars: getenvInt("MAX_HISTORY_CHARS", 12000),
@@ -62,7 +63,8 @@ func Load() Config {
 		LLMProvider:   getenv("LLM_PROVIDER", "ollama"),
 		OllamaURL:     getenv("OLLAMA_URL", "http://localhost:11434"),
 		OllamaModel:   getenv("OLLAMA_MODEL", "llama3:instruct"),
-		OllamaTimeout: getenvDuration("OLLAMA_TIMEOUT", 60*time.Second),
+		// Local inference (thinking mode, long prompts) often exceeds 60s.
+		OllamaTimeout: getenvDuration("OLLAMA_TIMEOUT", 180*time.Second),
 
 		DomainStrict: getenvBool("DOMAIN_STRICT", false),
 

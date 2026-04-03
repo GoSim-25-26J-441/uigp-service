@@ -175,15 +175,26 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 	h := normalizeHistory(req.History)
 	h = budgetHistory(h, s.maxHistoryItems, s.maxHistoryChars)
 
-	system := systemPrompt()
+	system := baseSystemPrompt()
 
 	llmMsgs := []llm.Message{
 		{Role: "system", Content: system},
 	}
 	if ctxText != "" {
 		llmMsgs = append(llmMsgs, llm.Message{
+			Role: "system",
+			Content: "Architecture context for this request only (from the current API payload: diagram_json, spec_summary, etc.). " +
+				"It was not necessarily sent in previous chat turns—do not tell the user the diagram or spec was 'provided earlier' in the conversation unless they literally pasted it in a message. " +
+				"Treat the following as factual input:\n" + ctxText,
+		})
+	}
+	if contextUsesDiagram(ctxUsed) {
+		llmMsgs = append(llmMsgs, llm.Message{
 			Role:    "system",
-			Content: "Architecture context (treat as factual input):\n" + ctxText,
+			Content: diagramArchitectureSystemPrompt(),
+		})
+		ctxSignals = mergeSignals(ctxSignals, map[string]any{
+			"diagram_analysis_prompt": true,
 		})
 	}
 	for _, it := range h {
@@ -208,10 +219,15 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 
 	profile, modeUsed, modeInvalid := s.pickProfile(req, ctxUsed, len(h))
 
+	numPredict := profile.NumPredict
+	if contextUsesDiagram(ctxUsed) && numPredict < 512 {
+		numPredict = 512
+	}
+
 	opts := map[string]any{
 		"temperature": profile.Temperature,
 		"num_ctx":     profile.NumCtx,
-		"num_predict": profile.NumPredict,
+		"num_predict": numPredict,
 	}
 
 	answer, err := s.llm.Chat(ctx, llm.ChatRequest{
@@ -251,16 +267,6 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 			"mode_invalid": modeInvalid,
 		},
 	}
-}
-
-func systemPrompt() string {
-	return `You are UIGP, a stateless microservices assistant.
-Answer the user's question clearly and directly.
-If crucial info is missing, ask only the minimum necessary clarifying question(s).
-Do not hallucinate architecture facts. Use the provided context if present.
-Keep the answer practical and implementation-oriented when relevant.
-Return concise answers by default (<= 120 words).
-Only expand if the user asks for details.`
 }
 
 func normalizeHistory(in []HistoryItem) []HistoryItem {

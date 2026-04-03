@@ -31,7 +31,7 @@ func NewClient(cfg Config) *Client {
 	}
 	to := cfg.Timeout
 	if to <= 0 {
-		to = 60 * time.Second
+		to = 180 * time.Second
 	}
 	model := cfg.DefaultModel
 	if model == "" {
