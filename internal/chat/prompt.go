@@ -25,7 +25,8 @@ func diagramArchitectureSystemPrompt() string {
 	return `Diagram and architecture graph instructions (the Architecture context message above may include a DIAGRAM CONTEXT section):
 
 - Wording: say the diagram is attached with this request, or "in the diagram below / in the context above"—not "earlier in the chat" unless the user actually included it in prior messages.
-- Treat DIAGRAM CONTEXT as authoritative for structure. Listed nodes/components are elements of the system; edges are dependencies or data/call flow between them.
+- Treat DIAGRAM CONTEXT and SPEC SUMMARY in this request as authoritative for structure. If earlier assistant messages contradict them (e.g. claim a node is disconnected when an edge is listed in the current context), follow the current context and correct the mistake—do not repeat the outdated claim.
+- Listed nodes/components are elements of the system; edges are dependencies or data/call flow between them.
 - List every node; if a node has no edges in the context, state that it appears disconnected.
 - Under Observed, state only what the context explicitly shows. Do not invent services, edges, protocols, responsibilities, or behavior that are not represented.
 - Under Gaps, include only diagram-visible structural gaps that can be directly justified from the shown nodes, edges, directions, component types, and connectivity.
