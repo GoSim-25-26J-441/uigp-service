@@ -69,11 +69,20 @@ func compactFromSpecSummary(m map[string]any) (string, map[string]any) {
 	sig["spec_dependencies_count"] = len(deps)
 	sig["spec_datastores_count"] = len(datastores)
 
+	serviceTypes := readStringStringMap(m["service_types"])
+	if len(serviceTypes) > 0 {
+		sig["spec_service_types_count"] = len(serviceTypes)
+	}
+
 	var b strings.Builder
 	if len(services) > 0 {
-		b.WriteString("Services:\n")
+		b.WriteString("Components (non-datastore):\n")
 		for _, s := range services {
-			b.WriteString("- " + s + "\n")
+			if typ, ok := serviceTypes[s]; ok && typ != "" {
+				b.WriteString("- " + s + " (" + typ + ")\n")
+			} else {
+				b.WriteString("- " + s + "\n")
+			}
 		}
 	}
 	if len(deps) > 0 {
@@ -104,8 +113,9 @@ func compactFromSpecSummary(m map[string]any) (string, map[string]any) {
 func compactFromDiagram(m map[string]any) (string, map[string]any) {
 	sig := map[string]any{}
 
-	// Build id->label map so edges print labels instead of ids
+	// Build id->label and id->type so edges and entry hints use human-readable names
 	idToLabel := map[string]string{}
+	idToType := map[string]string{}
 	if nv, ok := m["nodes"].([]any); ok {
 		for _, v := range nv {
 			if nm, ok := v.(map[string]any); ok {
@@ -113,6 +123,10 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 				lbl := fmt.Sprint(nm["label"])
 				if id != "" && id != "<nil>" && lbl != "" && lbl != "<nil>" {
 					idToLabel[id] = lbl
+				}
+				typ := strings.ToLower(strings.TrimSpace(fmt.Sprint(nm["type"])))
+				if id != "" && id != "<nil>" && typ != "" && typ != "<nil>" {
+					idToType[id] = typ
 				}
 			}
 		}
@@ -210,10 +224,65 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 			b.WriteString("- " + d + "\n")
 		}
 	}
+
+	// Highlight outbound edges from user-facing / entry nodes (client, user, external)
+	entryOutbound := diagramEntryOutboundLines(m, idToLabel, idToType)
+	if len(entryOutbound) > 0 {
+		b.WriteString("Entry / user-facing connectivity (outbound from client, user, or external nodes):\n")
+		for _, line := range entryOutbound {
+			b.WriteString("- " + line + "\n")
+		}
+		sig["diagram_entry_edges_count"] = len(entryOutbound)
+	}
+
 	if b.Len() == 0 {
 		b.WriteString("Diagram JSON provided but no known keys found (expected services/dependencies or nodes/edges).")
 	}
 	return strings.TrimSpace(b.String()), sig
+}
+
+// diagramEntryOutboundLines lists edges whose source node type is client, user, or external.
+func diagramEntryOutboundLines(
+	m map[string]any,
+	idToLabel map[string]string,
+	idToType map[string]string,
+) []string {
+	ev, ok := m["edges"].([]any)
+	if !ok || len(ev) == 0 {
+		return nil
+	}
+	entryKind := map[string]bool{
+		"client": true, "user": true, "external": true,
+	}
+	var lines []string
+	for _, v := range ev {
+		em, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		fromID := strings.TrimSpace(fmt.Sprint(em["from"]))
+		if fromID == "" || fromID == "<nil>" {
+			continue
+		}
+		if !entryKind[idToType[fromID]] {
+			continue
+		}
+		toID := strings.TrimSpace(fmt.Sprint(em["to"]))
+		fromLbl := fromID
+		if lb, ok := idToLabel[fromID]; ok && lb != "" {
+			fromLbl = lb
+		}
+		toLbl := toID
+		if lb, ok := idToLabel[toID]; ok && lb != "" {
+			toLbl = lb
+		}
+		proto := strings.TrimSpace(fmt.Sprint(em["protocol"]))
+		if proto == "" || proto == "<nil>" {
+			proto = "?"
+		}
+		lines = append(lines, fmt.Sprintf("%s → %s (%s)", fromLbl, toLbl, proto))
+	}
+	return lines
 }
 
 func readStringList(v any) []string {
@@ -226,6 +295,36 @@ func readStringList(v any) []string {
 			s := strings.TrimSpace(fmt.Sprint(x))
 			if s != "" && s != "<nil>" {
 				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// readStringStringMap reads JSON objects like service_types into a string map.
+func readStringStringMap(v any) map[string]string {
+	out := make(map[string]string)
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			s := strings.TrimSpace(fmt.Sprint(val))
+			if s != "" && s != "<nil>" {
+				out[k] = strings.ToLower(s)
+			}
+		}
+	case map[string]string:
+		for k, val := range t {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			s := strings.TrimSpace(val)
+			if s != "" {
+				out[k] = strings.ToLower(s)
 			}
 		}
 	}
