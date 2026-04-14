@@ -10,6 +10,7 @@ type HistoryItem struct {
 type ChatRequest struct {
 	SpecSummary map[string]any     `json:"spec_summary"`
 	DiagramJSON map[string]any     `json:"diagram_json"`
+	YamlContent string             `json:"yaml_content,omitempty"`
 	Attachments []types.Attachment `json:"attachments"`
 	History     []HistoryItem      `json:"history"`
 	Message     string             `json:"message"`
