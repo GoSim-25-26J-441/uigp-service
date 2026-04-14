@@ -144,7 +144,7 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 		}
 	}
 
-	ctxText, ctxUsed, ctxSignals := archctx.BuildCompactContext(req.SpecSummary, req.DiagramJSON, req.Attachments)
+	ctxText, ctxUsed, ctxSignals := archctx.BuildCompactContext(req.SpecSummary, req.DiagramJSON, strings.TrimSpace(req.YamlContent), req.Attachments)
 
 	ctxSignals = mergeSignals(ctxSignals, map[string]any{
 		"domain_strict": s.domainStrict,
@@ -319,7 +319,7 @@ func mergeSignals(a, b map[string]any) map[string]any {
 }
 
 func isOutOfScope(req ChatRequest, msg string, allowKeywords []string) (bool, string) {
-	if len(req.SpecSummary) > 0 || len(req.DiagramJSON) > 0 || len(req.Attachments) > 0 {
+	if len(req.SpecSummary) > 0 || len(req.DiagramJSON) > 0 || strings.TrimSpace(req.YamlContent) != "" || len(req.Attachments) > 0 {
 		return false, "has_arch_context"
 	}
 

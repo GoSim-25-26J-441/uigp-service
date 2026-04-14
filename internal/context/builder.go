@@ -2,14 +2,19 @@ package context
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/MalithGihan/uigp-service/pkg/types"
 )
 
+// maxYAMLChars limits architecture YAML embedded in the LLM system context.
+const maxYAMLChars = 32000
+
 func BuildCompactContext(
 	specSummary map[string]any,
 	diagramJSON map[string]any,
+	yamlContent string,
 	atts []types.Attachment,
 ) (text string, used string, signals map[string]any) {
 
@@ -41,6 +46,29 @@ func BuildCompactContext(
 		}
 	}
 
+	yamlContent = strings.TrimSpace(yamlContent)
+	if yamlContent != "" {
+		yl := yamlContent
+		truncated := false
+		if len(yl) > maxYAMLChars {
+			yl = yl[:maxYAMLChars] + "\n... [yaml truncated for context size]"
+			truncated = true
+		}
+		blocks = append(blocks, "ARCHITECTURE YAML (stored spec for this diagram version):\n"+yl)
+		usedParts = append(usedParts, "yaml_content")
+		signals["yaml_chars"] = len(yamlContent)
+		if truncated {
+			signals["yaml_truncated"] = true
+		}
+	}
+
+	if depNote, depSig := dependencyConsistencyNote(diagramJSON, yamlContent); depNote != "" {
+		blocks = append(blocks, depNote)
+		for k, v := range depSig {
+			signals[k] = v
+		}
+	}
+
 	if len(atts) > 0 {
 		var lines []string
 		for _, a := range atts {
@@ -54,7 +82,107 @@ func BuildCompactContext(
 	if len(blocks) == 0 {
 		return "", "none", signals
 	}
+
+	if note := connectivityAuthoritativeNote(signals, yamlContent); note != "" {
+		blocks = append(blocks, note)
+		signals["connectivity_all_sources_empty"] = true
+	}
+
 	return strings.Join(blocks, "\n\n"), strings.Join(usedParts, "+"), signals
+}
+
+// yamlShowsDependenciesAsEmptyList is true when YAML clearly has dependencies: [] (possibly indented).
+func yamlShowsDependenciesAsEmptyList(y string) bool {
+	y = strings.TrimSpace(y)
+	if y == "" {
+		return true
+	}
+	re := regexp.MustCompile(`(?m)^\s*dependencies:\s*\[\s*\]\s*$`)
+	if re.MatchString(y) {
+		return true
+	}
+	// Inline / compact forms often used by generators
+	return regexp.MustCompile(`(?m)\bdependencies:\s*\[\s*\]`).MatchString(y)
+}
+
+// yamlShowsDependencyObjects returns true when YAML lists at least one dependency object under dependencies.
+func yamlShowsDependencyObjects(y string) bool {
+	y = strings.TrimSpace(y)
+	if y == "" {
+		return false
+	}
+	i := strings.Index(y, "dependencies:")
+	if i < 0 {
+		return false
+	}
+	rest := y[i+len("dependencies:"):]
+	// next top-level key at column 0 ends the section
+	end := len(rest)
+	for j := 1; j < len(rest); j++ {
+		if rest[j] == '\n' && j+1 < len(rest) {
+			c := rest[j+1]
+			if c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '#' {
+				// start of a new top-level line (letter or quote)
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+					end = j + 1
+					break
+				}
+			}
+		}
+	}
+	section := rest[:end]
+	return regexp.MustCompile(`(?m)^\s*-\s+from:`).MatchString(section)
+}
+
+func connectivityAuthoritativeNote(signals map[string]any, yaml string) string {
+	diagDeps := intFromSignals(signals, "dependencies_count")
+	specDeps := intFromSignals(signals, "spec_dependencies_count")
+	if diagDeps > 0 || specDeps > 0 {
+		return ""
+	}
+	comp := intFromSignals(signals, "services_count")
+	if comp == 0 {
+		comp = intFromSignals(signals, "spec_services_count")
+	}
+	comp += intFromSignals(signals, "spec_datastores_count")
+	if comp < 1 {
+		return ""
+	}
+	// YAML with real dependency objects overrides "empty" heuristics
+	if yamlShowsDependencyObjects(yaml) {
+		return ""
+	}
+	if !yamlShowsDependenciesAsEmptyList(yaml) {
+		// YAML present but we cannot confirm an empty dependency list — skip the strong banner
+		if strings.TrimSpace(yaml) != "" {
+			return ""
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("CONNECTIVITY (authoritative for this turn — read before chat history):\n")
+	b.WriteString("- diagram_json, spec_summary, and (where present) architecture YAML all show **no** dependencies/edges between components.\n")
+	b.WriteString("- Do **not** state that nodes are connected, fully meshed, or wired together.\n")
+	b.WriteString("- If a prior assistant message in history claimed connectivity, treat that message as **wrong** and correct it using this context only.\n")
+	b.WriteString("- Diagram-visible gap: components are listed without any specified call/data/control flow between them (orphan / unspecified topology).\n")
+	return b.String()
+}
+
+func intFromSignals(signals map[string]any, key string) int {
+	v, ok := signals[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // Instead of “keys only”, show useful content (services/dependencies/datastores if present).
@@ -90,6 +218,9 @@ func compactFromSpecSummary(m map[string]any) (string, map[string]any) {
 		for _, d := range deps {
 			b.WriteString("- " + d + "\n")
 		}
+	} else if len(services) > 0 || len(datastores) > 0 {
+		b.WriteString("Dependencies:\n(none listed — do not assume services or datastores are connected.)\n")
+		sig["spec_dependencies_missing"] = true
 	}
 	if len(datastores) > 0 {
 		b.WriteString("Datastores:\n")
@@ -223,6 +354,9 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		for _, d := range deps {
 			b.WriteString("- " + d + "\n")
 		}
+	} else if len(services) > 0 {
+		b.WriteString("Edges:\n(none listed in diagram JSON — do not infer connections between nodes.)\n")
+		sig["diagram_edges_missing"] = true
 	}
 
 	// Highlight outbound edges from user-facing / entry nodes (client, user, external)
@@ -235,10 +369,386 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		sig["diagram_entry_edges_count"] = len(entryOutbound)
 	}
 
+	// Precomputed structural hints reduce reasoning misses for smaller LLMs.
+	if hintsText, hintSignals := diagramRiskHints(m, idToLabel, idToType); hintsText != "" {
+		b.WriteString("Structural risk hints (precomputed from topology):\n")
+		b.WriteString(hintsText)
+		if !strings.HasSuffix(hintsText, "\n") {
+			b.WriteString("\n")
+		}
+		for k, v := range hintSignals {
+			sig[k] = v
+		}
+	}
+
 	if b.Len() == 0 {
 		b.WriteString("Diagram JSON provided but no known keys found (expected services/dependencies or nodes/edges).")
 	}
 	return strings.TrimSpace(b.String()), sig
+}
+
+type topoEdge struct {
+	FromID string
+	ToID   string
+	Proto  string
+}
+
+func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType map[string]string) (string, map[string]any) {
+	sig := map[string]any{}
+	edges := parseTopoEdges(m)
+	if len(idToType) == 0 {
+		return "", sig
+	}
+
+	hasGateway := false
+	for _, t := range idToType {
+		if t == "gateway" {
+			hasGateway = true
+			break
+		}
+	}
+
+	incident := make(map[string]int, len(idToType))
+	inbound := make(map[string][]topoEdge, len(idToType))
+	outbound := make(map[string][]topoEdge, len(idToType))
+	for _, e := range edges {
+		incident[e.FromID]++
+		incident[e.ToID]++
+		outbound[e.FromID] = append(outbound[e.FromID], e)
+		inbound[e.ToID] = append(inbound[e.ToID], e)
+	}
+
+	entryTypes := map[string]bool{"client": true, "user": true, "external": true}
+	internalTypes := map[string]bool{"service": true, "gateway": true, "db": true, "database": true, "datastore": true, "topic": true, "queue": true}
+	dbTypes := map[string]bool{"db": true, "database": true, "datastore": true}
+
+	var orphan []string
+	for id, typ := range idToType {
+		if incident[id] != 0 {
+			continue
+		}
+		_ = typ
+		orphan = append(orphan, nodeLabel(id, idToLabel))
+	}
+	if len(orphan) > 0 {
+		sig["orphan_components_count"] = len(orphan)
+	}
+
+	var gatewayBypass []string
+	if hasGateway {
+		for _, e := range edges {
+			ft := idToType[e.FromID]
+			tt := idToType[e.ToID]
+			if !entryTypes[ft] {
+				continue
+			}
+			if tt == "gateway" {
+				continue
+			}
+			if internalTypes[tt] {
+				gatewayBypass = append(gatewayBypass, fmt.Sprintf("%s -> %s", nodeLabel(e.FromID, idToLabel), nodeLabel(e.ToID, idToLabel)))
+			}
+		}
+		if len(gatewayBypass) > 0 {
+			sig["gateway_bypass_count"] = len(gatewayBypass)
+		}
+	}
+
+	// Shared DB fan-in: more than one service writing/calling the same DB.
+	dbCallers := map[string]map[string]bool{}
+	for _, e := range edges {
+		ft := idToType[e.FromID]
+		tt := idToType[e.ToID]
+		if ft != "service" || !dbTypes[tt] {
+			continue
+		}
+		if dbCallers[e.ToID] == nil {
+			dbCallers[e.ToID] = map[string]bool{}
+		}
+		dbCallers[e.ToID][e.FromID] = true
+	}
+	var sharedDB []string
+	for dbID, callers := range dbCallers {
+		if len(callers) > 1 {
+			services := make([]string, 0, len(callers))
+			for sid := range callers {
+				services = append(services, nodeLabel(sid, idToLabel))
+			}
+			sharedDB = append(sharedDB, fmt.Sprintf("%s <= %s", nodeLabel(dbID, idToLabel), strings.Join(services, ", ")))
+		}
+	}
+	if len(sharedDB) > 0 {
+		sig["shared_db_fanin_count"] = len(sharedDB)
+	}
+
+	var dbOutbound []string
+	var externalDB []string
+	for _, e := range edges {
+		ft := idToType[e.FromID]
+		tt := idToType[e.ToID]
+		if dbTypes[ft] {
+			dbOutbound = append(dbOutbound, fmt.Sprintf("%s -> %s", nodeLabel(e.FromID, idToLabel), nodeLabel(e.ToID, idToLabel)))
+			if entryTypes[tt] {
+				externalDB = append(externalDB, fmt.Sprintf("%s -> %s", nodeLabel(e.FromID, idToLabel), nodeLabel(e.ToID, idToLabel)))
+			}
+		}
+		if dbTypes[tt] && entryTypes[ft] {
+			externalDB = append(externalDB, fmt.Sprintf("%s -> %s", nodeLabel(e.FromID, idToLabel), nodeLabel(e.ToID, idToLabel)))
+		}
+	}
+	if len(dbOutbound) > 0 {
+		sig["db_outbound_edges_count"] = len(dbOutbound)
+	}
+	if len(externalDB) > 0 {
+		sig["external_db_direct_edges_count"] = len(externalDB)
+	}
+
+	cycleCount := countCycles(edges)
+	if cycleCount > 0 {
+		sig["cycle_count"] = cycleCount
+	}
+
+	var missingProtocol []string
+	for _, e := range edges {
+		if strings.TrimSpace(e.Proto) != "" {
+			continue
+		}
+		missingProtocol = append(missingProtocol, fmt.Sprintf("%s -> %s", nodeLabel(e.FromID, idToLabel), nodeLabel(e.ToID, idToLabel)))
+	}
+	if len(missingProtocol) > 0 {
+		sig["missing_protocol_edges_count"] = len(missingProtocol)
+	}
+
+	var lines []string
+	if len(orphan) > 0 {
+		lines = append(lines, "- orphan/disconnected nodes: "+strings.Join(orphan, ", "))
+	}
+	if len(gatewayBypass) > 0 {
+		lines = append(lines, "- gateway bypass edges: "+strings.Join(gatewayBypass, "; "))
+	}
+	if len(sharedDB) > 0 {
+		lines = append(lines, "- shared database fan-in: "+strings.Join(sharedDB, "; "))
+	}
+	if len(dbOutbound) > 0 {
+		lines = append(lines, "- database outbound edges (suspicious): "+strings.Join(dbOutbound, "; "))
+	}
+	if len(externalDB) > 0 {
+		lines = append(lines, "- direct external<->database access: "+strings.Join(externalDB, "; "))
+	}
+	if cycleCount > 0 {
+		lines = append(lines, fmt.Sprintf("- dependency cycles detected: %d", cycleCount))
+	}
+	if len(missingProtocol) > 0 {
+		lines = append(lines, "- edges with missing protocol values: "+strings.Join(missingProtocol, "; "))
+	}
+	if len(lines) == 0 {
+		return "", sig
+	}
+	return strings.Join(lines, "\n") + "\n", sig
+}
+
+func dependencyConsistencyNote(diagramJSON map[string]any, yamlContent string) (string, map[string]any) {
+	sig := map[string]any{}
+	yamlContent = strings.TrimSpace(yamlContent)
+	if len(diagramJSON) == 0 || yamlContent == "" {
+		return "", sig
+	}
+
+	yamlDeps := parseYAMLDependencyPairs(yamlContent)
+	if len(yamlDeps) == 0 {
+		return "", sig
+	}
+	diagramDeps := parseDiagramDependencyPairs(diagramJSON)
+	if len(diagramDeps) == 0 {
+		// If diagram has no edges but YAML has deps, it's a strong inconsistency.
+		sig["yaml_diagram_dependency_mismatch_count"] = len(yamlDeps)
+		return "DEPENDENCY CONSISTENCY HINT:\n- YAML lists dependencies but diagram_json has no listed edges/dependencies. Treat this as a structural inconsistency.\n", sig
+	}
+
+	var yamlOnly []string
+	var diagramOnly []string
+	for dep := range yamlDeps {
+		if !diagramDeps[dep] {
+			yamlOnly = append(yamlOnly, dep)
+		}
+	}
+	for dep := range diagramDeps {
+		if !yamlDeps[dep] {
+			diagramOnly = append(diagramOnly, dep)
+		}
+	}
+	if len(yamlOnly) == 0 && len(diagramOnly) == 0 {
+		return "", sig
+	}
+
+	sig["yaml_diagram_dependency_mismatch_count"] = len(yamlOnly) + len(diagramOnly)
+	var b strings.Builder
+	b.WriteString("DEPENDENCY CONSISTENCY HINT:\n")
+	if len(yamlOnly) > 0 {
+		b.WriteString("- present in YAML only: " + strings.Join(yamlOnly, "; ") + "\n")
+	}
+	if len(diagramOnly) > 0 {
+		b.WriteString("- present in diagram only: " + strings.Join(diagramOnly, "; ") + "\n")
+	}
+	b.WriteString("- Treat this mismatch as a diagram-visible structural inconsistency.\n")
+	return b.String(), sig
+}
+
+func parseYAMLDependencyPairs(y string) map[string]bool {
+	out := map[string]bool{}
+	if strings.TrimSpace(y) == "" {
+		return out
+	}
+	lines := strings.Split(y, "\n")
+	inDeps := false
+	currentFrom := ""
+	currentTo := ""
+	for _, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !inDeps {
+			if strings.HasPrefix(trimmed, "dependencies:") {
+				inDeps = true
+			}
+			continue
+		}
+		// stop section on next top-level key
+		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+			break
+		}
+		if strings.HasPrefix(trimmed, "- from:") {
+			currentFrom = strings.TrimSpace(strings.TrimPrefix(trimmed, "- from:"))
+			currentFrom = strings.Trim(currentFrom, `"'`)
+			currentTo = ""
+			continue
+		}
+		if strings.HasPrefix(trimmed, "to:") {
+			currentTo = strings.TrimSpace(strings.TrimPrefix(trimmed, "to:"))
+			currentTo = strings.Trim(currentTo, `"'`)
+			if currentFrom != "" && currentTo != "" {
+				out[strings.ToLower(currentFrom)+"->"+strings.ToLower(currentTo)] = true
+			}
+		}
+	}
+	return out
+}
+
+func parseDiagramDependencyPairs(m map[string]any) map[string]bool {
+	out := map[string]bool{}
+	idToLabel := map[string]string{}
+	if nv, ok := m["nodes"].([]any); ok {
+		for _, v := range nv {
+			nm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := strings.TrimSpace(fmt.Sprint(nm["id"]))
+			lbl := strings.TrimSpace(fmt.Sprint(nm["label"]))
+			if id == "" || id == "<nil>" || lbl == "" || lbl == "<nil>" {
+				continue
+			}
+			idToLabel[id] = lbl
+		}
+	}
+	for _, e := range parseTopoEdges(m) {
+		from := nodeLabel(e.FromID, idToLabel)
+		to := nodeLabel(e.ToID, idToLabel)
+		from = strings.TrimSpace(strings.ToLower(from))
+		to = strings.TrimSpace(strings.ToLower(to))
+		if from == "" || to == "" || from == "<nil>" || to == "<nil>" {
+			continue
+		}
+		out[from+"->"+to] = true
+	}
+	return out
+}
+
+func parseTopoEdges(m map[string]any) []topoEdge {
+	var out []topoEdge
+	if ev, ok := m["edges"].([]any); ok {
+		for _, v := range ev {
+			em, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			from := strings.TrimSpace(fmt.Sprint(em["from"]))
+			to := strings.TrimSpace(fmt.Sprint(em["to"]))
+			if from == "" || from == "<nil>" || to == "" || to == "<nil>" {
+				continue
+			}
+			proto := strings.TrimSpace(fmt.Sprint(em["protocol"]))
+			if proto == "<nil>" {
+				proto = ""
+			}
+			out = append(out, topoEdge{FromID: from, ToID: to, Proto: proto})
+		}
+		return out
+	}
+	if dv, ok := m["dependencies"].([]any); ok {
+		for _, v := range dv {
+			dm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			from := strings.TrimSpace(fmt.Sprint(dm["from"]))
+			to := strings.TrimSpace(fmt.Sprint(dm["to"]))
+			if from == "" || from == "<nil>" || to == "" || to == "<nil>" {
+				continue
+			}
+			proto := strings.TrimSpace(fmt.Sprint(dm["kind"]))
+			if proto == "<nil>" {
+				proto = ""
+			}
+			out = append(out, topoEdge{FromID: from, ToID: to, Proto: proto})
+		}
+	}
+	return out
+}
+
+func nodeLabel(id string, idToLabel map[string]string) string {
+	if l, ok := idToLabel[id]; ok && l != "" {
+		return l
+	}
+	return id
+}
+
+func countCycles(edges []topoEdge) int {
+	adj := map[string][]string{}
+	nodes := map[string]bool{}
+	for _, e := range edges {
+		adj[e.FromID] = append(adj[e.FromID], e.ToID)
+		nodes[e.FromID] = true
+		nodes[e.ToID] = true
+	}
+	seen := map[string]bool{}
+	stack := map[string]bool{}
+	cycles := 0
+
+	var dfs func(string)
+	dfs = func(n string) {
+		seen[n] = true
+		stack[n] = true
+		for _, nxt := range adj[n] {
+			if !seen[nxt] {
+				dfs(nxt)
+				continue
+			}
+			if stack[nxt] {
+				cycles++
+			}
+		}
+		stack[n] = false
+	}
+
+	for n := range nodes {
+		if !seen[n] {
+			dfs(n)
+		}
+	}
+	return cycles
 }
 
 // diagramEntryOutboundLines lists edges whose source node type is client, user, or external.
