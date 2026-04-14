@@ -51,7 +51,7 @@ func Load() Config {
 		APIKey:       os.Getenv("UIGP_API_KEY"),
 		MaxBodyBytes: getenvInt64("MAX_BODY_BYTES", 8<<20),
 
-		ReadTimeout:  getenvDuration("READ_TIMEOUT", 10*time.Second),
+		ReadTimeout: getenvDuration("READ_TIMEOUT", 10*time.Second),
 		// Must exceed OLLAMA_TIMEOUT so the handler can finish after the LLM returns.
 		WriteTimeout: getenvDuration("WRITE_TIMEOUT", 240*time.Second),
 		IdleTimeout:  getenvDuration("IDLE_TIMEOUT", 120*time.Second),
@@ -60,13 +60,14 @@ func Load() Config {
 		MaxHistoryChars: getenvInt("MAX_HISTORY_CHARS", 12000),
 		LLMConcurrency:  getenvInt("LLM_CONCURRENCY", 2),
 
-		LLMProvider:   getenv("LLM_PROVIDER", "ollama"),
-		OllamaURL:     getenv("OLLAMA_URL", "http://localhost:11434"),
-		OllamaModel:   getenv("OLLAMA_MODEL", "llama3:instruct"),
+		LLMProvider: getenv("LLM_PROVIDER", "ollama"),
+		OllamaURL:   getenv("OLLAMA_URL", "http://localhost:11434"),
+		OllamaModel: getenv("OLLAMA_MODEL", "llama3:instruct"),
 		// Local inference (thinking mode, long prompts) often exceeds 60s.
 		OllamaTimeout: getenvDuration("OLLAMA_TIMEOUT", 180*time.Second),
 
-		DomainStrict: getenvBool("DOMAIN_STRICT", false),
+		// Default to strict domain filtering so general chit-chat/out-of-scope questions
+		DomainStrict: getenvBool("DOMAIN_STRICT", true),
 
 		DomainKeywords: getenvCSV("DOMAIN_KEYWORDS"),
 
