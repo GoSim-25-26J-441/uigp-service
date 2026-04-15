@@ -3,13 +3,15 @@ package context
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/MalithGihan/uigp-service/pkg/types"
 )
 
 // maxYAMLChars limits architecture YAML embedded in the LLM system context.
-const maxYAMLChars = 32000
+// Keep this conservative; very large YAML payloads can trigger upstream model timeouts.
+const maxYAMLChars = 4000
 
 func BuildCompactContext(
 	specSummary map[string]any,
@@ -54,7 +56,7 @@ func BuildCompactContext(
 			yl = yl[:maxYAMLChars] + "\n... [yaml truncated for context size]"
 			truncated = true
 		}
-		blocks = append(blocks, "ARCHITECTURE YAML (stored spec for this diagram version):\n"+yl)
+		blocks = append(blocks, compactYAMLContextBlock(yl))
 		usedParts = append(usedParts, "yaml_content")
 		signals["yaml_chars"] = len(yamlContent)
 		if truncated {
@@ -89,6 +91,36 @@ func BuildCompactContext(
 	}
 
 	return strings.Join(blocks, "\n\n"), strings.Join(usedParts, "+"), signals
+}
+
+func compactYAMLContextBlock(yaml string) string {
+	depPairs := parseYAMLDependencyPairs(yaml)
+	if len(depPairs) == 0 {
+		if yamlShowsDependenciesAsEmptyList(yaml) {
+			return "ARCHITECTURE YAML:\nDependencies: [] (explicitly empty in YAML)."
+		}
+		return "ARCHITECTURE YAML:\nYAML is present for this version, but no explicit dependency pairs were extracted."
+	}
+
+	deps := make([]string, 0, len(depPairs))
+	for dep := range depPairs {
+		deps = append(deps, dep)
+	}
+	sort.Strings(deps)
+
+	const maxLines = 60
+	var b strings.Builder
+	b.WriteString("ARCHITECTURE YAML (dependency pairs extracted):\n")
+	for i, dep := range deps {
+		if i >= maxLines {
+			b.WriteString("- ... additional dependencies omitted\n")
+			break
+		}
+		b.WriteString("- ")
+		b.WriteString(dep)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // yamlShowsDependenciesAsEmptyList is true when YAML clearly has dependencies: [] (possibly indented).
