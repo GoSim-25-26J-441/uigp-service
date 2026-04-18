@@ -220,8 +220,8 @@ func (s *Service) Handle(ctx stdctx.Context, req ChatRequest) ChatResponse {
 	profile, modeUsed, modeInvalid := s.pickProfile(req, ctxUsed, len(h))
 
 	numPredict := profile.NumPredict
-	if contextUsesDiagram(ctxUsed) && numPredict < 512 {
-		numPredict = 512
+	if contextUsesDiagram(ctxUsed) && numPredict < 320 {
+		numPredict = 320
 	}
 
 	opts := map[string]any{
