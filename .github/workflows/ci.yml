@@ -2,22 +2,123 @@ name: CI
 
 on:
   push:
+    branches: [main, dev, ci]
   pull_request:
+    branches: [main, dev, ci]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
-      - name: Test (unit, fake LLM)
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
         env:
           LLM_PROVIDER: fake
           UIGP_API_KEY: dev-key
           DOMAIN_STRICT: "true"
+        run: go test -v -race -count=1 ./...
+
+  deploy:
+    environment: production
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+    concurrency:
+      group: deploy-uigp-main
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build Linux binary
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o app ./cmd/uigp
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHub_to_AWS_via_FederatedOIDC
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload binary to S3
+        run: aws s3 cp app s3://${{ secrets.DEPLOY_BUCKET }}/uigp-service/app
+
+      - name: Upload deploy script to S3
+        run: aws s3 cp scripts/ec2-deploy.sh s3://${{ secrets.DEPLOY_BUCKET }}/uigp-service/scripts/deploy.sh
+
+      - name: Deploy via SSM Run Command
+        env:
+          BUCKET: ${{ secrets.DEPLOY_BUCKET }}
+          REGION: ${{ env.AWS_REGION }}
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
-          go test ./... -v
+          set -euo pipefail
+          cmd="aws s3 cp s3://${BUCKET}/uigp-service/scripts/deploy.sh /tmp/deploy.sh --region ${REGION} && chmod +x /tmp/deploy.sh && /tmp/deploy.sh ${BUCKET} ${REGION}"
+          json_commands=$(echo -n "$cmd" | jq -Rs .)
+          cmd_id=$(aws ssm send-command \
+            --region "${REGION}" \
+            --document-name "AWS-RunShellScript" \
+            --instance-ids "${INSTANCE_ID}" \
+            --parameters "{\"commands\":[$json_commands]}" \
+            --query "Command.CommandId" \
+            --output text)
+          echo "SSM command ID: ${cmd_id}"
+
+          aws ssm wait command-executed \
+            --region "${REGION}" \
+            --command-id "${cmd_id}" \
+            --instance-id "${INSTANCE_ID}"
+
+          status=$(aws ssm get-command-invocation \
+            --region "${REGION}" \
+            --command-id "${cmd_id}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "Status" \
+            --output text)
+
+          echo "--- SSM stdout ---"
+          aws ssm get-command-invocation \
+            --region "${REGION}" \
+            --command-id "${cmd_id}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "StandardOutputContent" \
+            --output text
+
+          echo "--- SSM stderr ---"
+          aws ssm get-command-invocation \
+            --region "${REGION}" \
+            --command-id "${cmd_id}" \
+            --instance-id "${INSTANCE_ID}" \
+            --query "StandardErrorContent" \
+            --output text
+
+          if [ "${status}" != "Success" ]; then
+            echo "Deployment failed: SSM status=${status}" >&2
+            exit 1
+          fi
+          echo "Deployment finished successfully (SSM status=${status})."
