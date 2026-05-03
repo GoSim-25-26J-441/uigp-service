@@ -26,13 +26,13 @@ SSM_PARAM_ENV="${SSM_PARAM_ENV:-/uigp/production/env}"
 
 mkdir -p "$APP_DIR"
 
-echo "Fetching .env from Parameter Store (${SSM_PARAM_ENV})..."
-aws ssm get-parameter \
-  --name "$SSM_PARAM_ENV" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text \
-  --region "$REGION" | tee "$APP_DIR/.env" > /dev/null
+# echo "Fetching .env from Parameter Store (${SSM_PARAM_ENV})..."
+# aws ssm get-parameter \
+#   --name "$SSM_PARAM_ENV" \
+#   --with-decryption \
+#   --query "Parameter.Value" \
+#   --output text \
+#   --region "$REGION" | tee "$APP_DIR/.env" > /dev/null
 
 echo "Downloading app binary from S3..."
 aws s3 cp "s3://${BUCKET}/uigp-service/app" "$APP_DIR/app" --region "$REGION"
