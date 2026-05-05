@@ -295,9 +295,6 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		}
 	}
 
-	// services[] / datastores[] / topics[] carry kinds used by dependencies (from/to are names, not canvas ids).
-	mergeDiagramIdentityMaps(m, idToLabel, idToType)
-
 	var services []string
 	var deps []string
 
@@ -309,38 +306,9 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 				services = append(services, t)
 			case map[string]any:
 				if n, ok := t["name"].(string); ok {
-					// Exact names only in context text (kinds are still in mergeDiagramIdentityMaps for analysis).
 					services = append(services, n)
 				}
 			}
-		}
-	}
-	var datastores []string
-	if dv, ok := m["datastores"].([]any); ok {
-		for _, v := range dv {
-			dm, ok := v.(map[string]any)
-			if !ok {
-				continue
-			}
-			name := strings.TrimSpace(fmt.Sprint(dm["name"]))
-			if name == "" || name == "<nil>" {
-				continue
-			}
-			datastores = append(datastores, name)
-		}
-	}
-	var topics []string
-	if tv, ok := m["topics"].([]any); ok {
-		for _, v := range tv {
-			dm, ok := v.(map[string]any)
-			if !ok {
-				continue
-			}
-			name := strings.TrimSpace(fmt.Sprint(dm["name"]))
-			if name == "" || name == "<nil>" {
-				continue
-			}
-			topics = append(topics, name)
 		}
 	}
 	if dv, ok := m["dependencies"].([]any); ok {
@@ -359,11 +327,15 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 			for _, v := range nv {
 				if nm, ok := v.(map[string]any); ok {
 					lbl := fmt.Sprint(nm["label"])
+					typ := fmt.Sprint(nm["type"])
 					if lbl == "" || lbl == "<nil>" {
 						continue
 					}
-					// Label only; node types are available to risk hints via idToType.
-					services = append(services, lbl)
+					if typ != "" && typ != "<nil>" {
+						services = append(services, fmt.Sprintf("%s (%s)", lbl, typ))
+					} else {
+						services = append(services, lbl)
+					}
 				}
 			}
 		}
@@ -390,8 +362,6 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 
 	sig["services_count"] = len(services)
 	sig["dependencies_count"] = len(deps)
-	sig["datastores_count"] = len(datastores)
-	sig["topics_count"] = len(topics)
 
 	// include diagram_version_id if present
 	if md, ok := m["metadata"].(map[string]any); ok {
@@ -406,21 +376,9 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		b.WriteString("Diagram version: " + dv + "\n")
 	}
 	if len(services) > 0 {
-		b.WriteString("Nodes (service and other components; names are exact strings from diagram JSON):\n")
+		b.WriteString("Nodes:\n")
 		for _, s := range services {
 			b.WriteString("- " + s + "\n")
-		}
-	}
-	if len(datastores) > 0 {
-		b.WriteString("Datastores (exact names from diagram JSON):\n")
-		for _, d := range datastores {
-			b.WriteString("- " + d + "\n")
-		}
-	}
-	if len(topics) > 0 {
-		b.WriteString("Topics (exact names from diagram JSON):\n")
-		for _, tn := range topics {
-			b.WriteString("- " + tn + "\n")
 		}
 	}
 	if len(deps) > 0 {
@@ -433,10 +391,10 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		sig["diagram_edges_missing"] = true
 	}
 
-	// Highlight outbound edges from user-facing / entry nodes (client, user, user_actor, external)
+	// Highlight outbound edges from user-facing / entry nodes (client, user, external)
 	entryOutbound := diagramEntryOutboundLines(m, idToLabel, idToType)
 	if len(entryOutbound) > 0 {
-		b.WriteString("Entry / user-facing connectivity (outbound from client, user, user_actor, or external nodes):\n")
+		b.WriteString("Entry / user-facing connectivity (outbound from client, user, or external nodes):\n")
 		for _, line := range entryOutbound {
 			b.WriteString("- " + line + "\n")
 		}
@@ -461,84 +419,6 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 	return strings.TrimSpace(b.String()), sig
 }
 
-// mergeDiagramIdentityMaps fills idToLabel/idToType from services[], datastores[], and topics[]
-// when the payload uses the spec-style shape (names in dependency from/to). Canvas nodes[] wins
-// for ids that already have a type.
-func mergeDiagramIdentityMaps(m map[string]any, idToLabel, idToType map[string]string) {
-	if m == nil {
-		return
-	}
-	if sv, ok := m["services"].([]any); ok {
-		for _, v := range sv {
-			switch t := v.(type) {
-			case string:
-				name := strings.TrimSpace(t)
-				if name == "" {
-					continue
-				}
-				if _, ok := idToLabel[name]; !ok {
-					idToLabel[name] = name
-				}
-				if _, exists := idToType[name]; !exists {
-					idToType[name] = "service"
-				}
-			case map[string]any:
-				name := strings.TrimSpace(fmt.Sprint(t["name"]))
-				if name == "" || name == "<nil>" {
-					continue
-				}
-				if _, ok := idToLabel[name]; !ok {
-					idToLabel[name] = name
-				}
-				kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(t["kind"])))
-				if kind != "" && kind != "<nil>" {
-					if _, exists := idToType[name]; !exists {
-						idToType[name] = kind
-					}
-				} else if _, exists := idToType[name]; !exists {
-					idToType[name] = "service"
-				}
-			}
-		}
-	}
-	if dv, ok := m["datastores"].([]any); ok {
-		for _, v := range dv {
-			dm, ok := v.(map[string]any)
-			if !ok {
-				continue
-			}
-			name := strings.TrimSpace(fmt.Sprint(dm["name"]))
-			if name == "" || name == "<nil>" {
-				continue
-			}
-			if _, ok := idToLabel[name]; !ok {
-				idToLabel[name] = name
-			}
-			if _, exists := idToType[name]; !exists {
-				idToType[name] = "db"
-			}
-		}
-	}
-	if tv, ok := m["topics"].([]any); ok {
-		for _, v := range tv {
-			dm, ok := v.(map[string]any)
-			if !ok {
-				continue
-			}
-			name := strings.TrimSpace(fmt.Sprint(dm["name"]))
-			if name == "" || name == "<nil>" {
-				continue
-			}
-			if _, ok := idToLabel[name]; !ok {
-				idToLabel[name] = name
-			}
-			if _, exists := idToType[name]; !exists {
-				idToType[name] = "topic"
-			}
-		}
-	}
-}
-
 type topoEdge struct {
 	FromID string
 	ToID   string
@@ -548,22 +428,6 @@ type topoEdge struct {
 func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType map[string]string) (string, map[string]any) {
 	sig := map[string]any{}
 	edges := parseTopoEdges(m)
-	if len(idToType) == 0 && len(edges) > 0 {
-		for _, e := range edges {
-			for _, id := range []string{e.FromID, e.ToID} {
-				id = strings.TrimSpace(id)
-				if id == "" || id == "<nil>" {
-					continue
-				}
-				if _, ok := idToLabel[id]; !ok {
-					idToLabel[id] = id
-				}
-				if _, ok := idToType[id]; !ok {
-					idToType[id] = "unknown"
-				}
-			}
-		}
-	}
 	if len(idToType) == 0 {
 		return "", sig
 	}
@@ -586,7 +450,7 @@ func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType ma
 		inbound[e.ToID] = append(inbound[e.ToID], e)
 	}
 
-	entryTypes := map[string]bool{"client": true, "user": true, "user_actor": true, "external": true}
+	entryTypes := map[string]bool{"client": true, "user": true, "external": true}
 	internalTypes := map[string]bool{"service": true, "gateway": true, "db": true, "database": true, "datastore": true, "topic": true, "queue": true}
 	dbTypes := map[string]bool{"db": true, "database": true, "datastore": true}
 
@@ -620,19 +484,6 @@ func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType ma
 		if len(gatewayBypass) > 0 {
 			sig["gateway_bypass_count"] = len(gatewayBypass)
 		}
-	}
-
-	gatewayKinds := map[string]bool{"gateway": true, "bff": true, "edge": true, "apigateway": true}
-	var serviceToGateway []string
-	for _, e := range edges {
-		ft := idToType[e.FromID]
-		tt := idToType[e.ToID]
-		if ft == "service" && gatewayKinds[tt] {
-			serviceToGateway = append(serviceToGateway, fmt.Sprintf("%s -> %s", nodeLabel(e.FromID, idToLabel), nodeLabel(e.ToID, idToLabel)))
-		}
-	}
-	if len(serviceToGateway) > 0 {
-		sig["service_to_gateway_edges_count"] = len(serviceToGateway)
 	}
 
 	// Shared DB fan-in: more than one service writing/calling the same DB.
@@ -702,13 +553,10 @@ func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType ma
 
 	var lines []string
 	if len(orphan) > 0 {
-		lines = append(lines, "- graph-isolated components (listed in diagram but zero dependency edges as from/to): "+strings.Join(orphan, ", "))
+		lines = append(lines, "- orphan/disconnected nodes: "+strings.Join(orphan, ", "))
 	}
 	if len(gatewayBypass) > 0 {
 		lines = append(lines, "- gateway bypass edges: "+strings.Join(gatewayBypass, "; "))
-	}
-	if len(serviceToGateway) > 0 {
-		lines = append(lines, "- service → gateway edges (ingress is usually gateway → service; verify intent): "+strings.Join(serviceToGateway, "; "))
 	}
 	if len(sharedDB) > 0 {
 		lines = append(lines, "- shared database fan-in: "+strings.Join(sharedDB, "; "))
@@ -935,28 +783,42 @@ func countCycles(edges []topoEdge) int {
 	return cycles
 }
 
-// diagramEntryOutboundLines lists edges whose source node type is a flow actor (client, user, user_actor, external).
+// diagramEntryOutboundLines lists edges whose source node type is client, user, or external.
 func diagramEntryOutboundLines(
 	m map[string]any,
 	idToLabel map[string]string,
 	idToType map[string]string,
 ) []string {
+	ev, ok := m["edges"].([]any)
+	if !ok || len(ev) == 0 {
+		return nil
+	}
 	entryKind := map[string]bool{
-		"client": true, "user": true, "user_actor": true, "external": true,
+		"client": true, "user": true, "external": true,
 	}
 	var lines []string
-	for _, e := range parseTopoEdges(m) {
-		fromID := strings.TrimSpace(e.FromID)
+	for _, v := range ev {
+		em, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		fromID := strings.TrimSpace(fmt.Sprint(em["from"]))
 		if fromID == "" || fromID == "<nil>" {
 			continue
 		}
 		if !entryKind[idToType[fromID]] {
 			continue
 		}
-		toID := strings.TrimSpace(e.ToID)
-		fromLbl := nodeLabel(fromID, idToLabel)
-		toLbl := nodeLabel(toID, idToLabel)
-		proto := strings.TrimSpace(e.Proto)
+		toID := strings.TrimSpace(fmt.Sprint(em["to"]))
+		fromLbl := fromID
+		if lb, ok := idToLabel[fromID]; ok && lb != "" {
+			fromLbl = lb
+		}
+		toLbl := toID
+		if lb, ok := idToLabel[toID]; ok && lb != "" {
+			toLbl = lb
+		}
+		proto := strings.TrimSpace(fmt.Sprint(em["protocol"]))
 		if proto == "" || proto == "<nil>" {
 			proto = "?"
 		}
