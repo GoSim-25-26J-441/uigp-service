@@ -399,10 +399,10 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		sig["diagram_edges_missing"] = true
 	}
 
-	// Highlight outbound edges from user-facing / entry nodes (client, user, external)
+	// Highlight outbound edges from user-facing / entry nodes (client, user, user_actor, external)
 	entryOutbound := diagramEntryOutboundLines(m, idToLabel, idToType)
 	if len(entryOutbound) > 0 {
-		b.WriteString("Entry / user-facing connectivity (outbound from client, user, or external nodes):\n")
+		b.WriteString("Entry / user-facing connectivity (outbound from client, user, user_actor, or external nodes):\n")
 		for _, line := range entryOutbound {
 			b.WriteString("- " + line + "\n")
 		}
@@ -552,7 +552,7 @@ func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType ma
 		inbound[e.ToID] = append(inbound[e.ToID], e)
 	}
 
-	entryTypes := map[string]bool{"client": true, "user": true, "external": true}
+	entryTypes := map[string]bool{"client": true, "user": true, "user_actor": true, "external": true}
 	internalTypes := map[string]bool{"service": true, "gateway": true, "db": true, "database": true, "datastore": true, "topic": true, "queue": true}
 	dbTypes := map[string]bool{"db": true, "database": true, "datastore": true}
 
@@ -901,14 +901,14 @@ func countCycles(edges []topoEdge) int {
 	return cycles
 }
 
-// diagramEntryOutboundLines lists edges whose source node type is client, user, or external.
+// diagramEntryOutboundLines lists edges whose source node type is a flow actor (client, user, user_actor, external).
 func diagramEntryOutboundLines(
 	m map[string]any,
 	idToLabel map[string]string,
 	idToType map[string]string,
 ) []string {
 	entryKind := map[string]bool{
-		"client": true, "user": true, "external": true,
+		"client": true, "user": true, "user_actor": true, "external": true,
 	}
 	var lines []string
 	for _, e := range parseTopoEdges(m) {
