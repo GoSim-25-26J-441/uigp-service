@@ -309,14 +309,38 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 				services = append(services, t)
 			case map[string]any:
 				if n, ok := t["name"].(string); ok {
-					kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(t["kind"])))
-					if kind != "" && kind != "<nil>" {
-						services = append(services, fmt.Sprintf("%s (%s)", n, kind))
-					} else {
-						services = append(services, n)
-					}
+					// Exact names only in context text (kinds are still in mergeDiagramIdentityMaps for analysis).
+					services = append(services, n)
 				}
 			}
+		}
+	}
+	var datastores []string
+	if dv, ok := m["datastores"].([]any); ok {
+		for _, v := range dv {
+			dm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(fmt.Sprint(dm["name"]))
+			if name == "" || name == "<nil>" {
+				continue
+			}
+			datastores = append(datastores, name)
+		}
+	}
+	var topics []string
+	if tv, ok := m["topics"].([]any); ok {
+		for _, v := range tv {
+			dm, ok := v.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(fmt.Sprint(dm["name"]))
+			if name == "" || name == "<nil>" {
+				continue
+			}
+			topics = append(topics, name)
 		}
 	}
 	if dv, ok := m["dependencies"].([]any); ok {
@@ -335,15 +359,11 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 			for _, v := range nv {
 				if nm, ok := v.(map[string]any); ok {
 					lbl := fmt.Sprint(nm["label"])
-					typ := fmt.Sprint(nm["type"])
 					if lbl == "" || lbl == "<nil>" {
 						continue
 					}
-					if typ != "" && typ != "<nil>" {
-						services = append(services, fmt.Sprintf("%s (%s)", lbl, typ))
-					} else {
-						services = append(services, lbl)
-					}
+					// Label only; node types are available to risk hints via idToType.
+					services = append(services, lbl)
 				}
 			}
 		}
@@ -370,6 +390,8 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 
 	sig["services_count"] = len(services)
 	sig["dependencies_count"] = len(deps)
+	sig["datastores_count"] = len(datastores)
+	sig["topics_count"] = len(topics)
 
 	// include diagram_version_id if present
 	if md, ok := m["metadata"].(map[string]any); ok {
@@ -384,9 +406,21 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		b.WriteString("Diagram version: " + dv + "\n")
 	}
 	if len(services) > 0 {
-		b.WriteString("Nodes:\n")
+		b.WriteString("Nodes (service and other components; names are exact strings from diagram JSON):\n")
 		for _, s := range services {
 			b.WriteString("- " + s + "\n")
+		}
+	}
+	if len(datastores) > 0 {
+		b.WriteString("Datastores (exact names from diagram JSON):\n")
+		for _, d := range datastores {
+			b.WriteString("- " + d + "\n")
+		}
+	}
+	if len(topics) > 0 {
+		b.WriteString("Topics (exact names from diagram JSON):\n")
+		for _, tn := range topics {
+			b.WriteString("- " + tn + "\n")
 		}
 	}
 	if len(deps) > 0 {
@@ -399,10 +433,10 @@ func compactFromDiagram(m map[string]any) (string, map[string]any) {
 		sig["diagram_edges_missing"] = true
 	}
 
-	// Highlight outbound edges from user-facing / entry nodes (client, user, external)
+	// Highlight outbound edges from user-facing / entry nodes (client, user, user_actor, external)
 	entryOutbound := diagramEntryOutboundLines(m, idToLabel, idToType)
 	if len(entryOutbound) > 0 {
-		b.WriteString("Entry / user-facing connectivity (outbound from client, user, or external nodes):\n")
+		b.WriteString("Entry / user-facing connectivity (outbound from client, user, user_actor, or external nodes):\n")
 		for _, line := range entryOutbound {
 			b.WriteString("- " + line + "\n")
 		}
@@ -552,7 +586,7 @@ func diagramRiskHints(m map[string]any, idToLabel map[string]string, idToType ma
 		inbound[e.ToID] = append(inbound[e.ToID], e)
 	}
 
-	entryTypes := map[string]bool{"client": true, "user": true, "external": true}
+	entryTypes := map[string]bool{"client": true, "user": true, "user_actor": true, "external": true}
 	internalTypes := map[string]bool{"service": true, "gateway": true, "db": true, "database": true, "datastore": true, "topic": true, "queue": true}
 	dbTypes := map[string]bool{"db": true, "database": true, "datastore": true}
 
@@ -901,14 +935,14 @@ func countCycles(edges []topoEdge) int {
 	return cycles
 }
 
-// diagramEntryOutboundLines lists edges whose source node type is client, user, or external.
+// diagramEntryOutboundLines lists edges whose source node type is a flow actor (client, user, user_actor, external).
 func diagramEntryOutboundLines(
 	m map[string]any,
 	idToLabel map[string]string,
 	idToType map[string]string,
 ) []string {
 	entryKind := map[string]bool{
-		"client": true, "user": true, "external": true,
+		"client": true, "user": true, "user_actor": true, "external": true,
 	}
 	var lines []string
 	for _, e := range parseTopoEdges(m) {
