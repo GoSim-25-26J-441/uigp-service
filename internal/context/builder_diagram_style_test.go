@@ -73,4 +73,7 @@ func TestBuildCompactContext_servicesDependenciesRiskHints(t *testing.T) {
 	if !strings.Contains(text, "web-site") || !strings.Contains(text, "Entry / user-facing connectivity") {
 		t.Fatalf("expected entry connectivity for client outbound:\n%s", text)
 	}
+	if !strings.Contains(text, "Datastores (exact names") || !strings.Contains(text, "- db-1") {
+		t.Fatalf("expected Datastores section with db-1:\n%s", text)
+	}
 }

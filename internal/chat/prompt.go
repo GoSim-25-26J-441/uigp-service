@@ -55,6 +55,7 @@ Edge fidelity (critical)
 
 Evidence
 - Ground structural statements in the diagram JSON (and YAML/spec when provided). Cite node ids or labels and edge direction when pointing at the drawing.
+- When listing components for the user, **copy exact names** from the DIAGRAM CONTEXT **Nodes**, **Datastores**, **Topics**, and **Edges** lines. Never rename nodes to generic placeholders (e.g. service-1, database-1, gateway-1) and never collapse kinds into phrases like "client/user/external" unless you are quoting multiple distinct nodes.
 - Include only real findings; never use "none", "N/A", or empty sections as placeholders.
 
 Disconnected vs odd wiring
